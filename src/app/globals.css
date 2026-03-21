@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  --stone: #f5f0eb;
+  --mist: #e8e2db;
+  --ink: #2c2825;
+  --ink-light: #6b6560;
+  --sage: #8b9d83;
+  --terracotta: #c07654;
+  --sand: #d4c5b2;
+  --cream: #faf7f4;
+}
+
+@theme inline {
+  --color-stone: var(--stone);
+  --color-mist: var(--mist);
+  --color-ink: var(--ink);
+  --color-ink-light: var(--ink-light);
+  --color-sage: var(--sage);
+  --color-terracotta: var(--terracotta);
+  --color-sand: var(--sand);
+  --color-cream: var(--cream);
+  --font-display: var(--font-cormorant);
+  --font-body: var(--font-dm-sans);
+}
+
+body {
+  background: var(--stone);
+  color: var(--ink);
+  font-family: var(--font-body), system-ui, sans-serif;
+}
+
+/* Subtle noise texture overlay */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
