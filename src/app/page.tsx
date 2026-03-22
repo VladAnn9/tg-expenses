@@ -3,7 +3,18 @@ import { createClient } from "@/lib/supabase/server";
 import Image from "next/image";
 import Link from "next/link";
 
-export default async function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ code?: string }>;
+}) {
+  const { code } = await searchParams;
+
+  // Supabase may redirect OAuth code to root — forward to callback
+  if (code) {
+    redirect(`/auth/callback?code=${code}`);
+  }
+
   const supabase = await createClient();
   const {
     data: { user },

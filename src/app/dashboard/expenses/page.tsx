@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import ExpenseCard from "@/components/expenses/expense-card";
 import ExpenseForm from "@/components/expenses/expense-form";
 import AnimatedSection from "@/components/ui/animated-section";
@@ -29,20 +29,60 @@ export default function ExpensesPage() {
   });
   const [filterCategory, setFilterCategory] = useState<string>("");
 
-  const fetchExpenses = useCallback(async () => {
-    setLoading(true);
-    const params = new URLSearchParams({ month, limit: "50" });
-    if (filterCategory) params.set("category", filterCategory);
+  // Client-side cache: "month|category" → Expense[]
+  const cache = useRef(new Map<string, Expense[]>());
+
+  const cacheKey = `${month}|${filterCategory}`;
+
+  const fetchExpenses = useCallback(async (opts?: { invalidate?: boolean }) => {
+    const key = `${month}|${filterCategory}`;
+    const cached = cache.current.get(key);
+
+    // Show cached data instantly if available
+    if (cached && !opts?.invalidate) {
+      setExpenses(cached);
+      setLoading(false);
+      // Revalidate silently in background
+      fetchFromApi(key, true);
+      return;
+    }
+
+    // No cache — show skeleton only on first ever load
+    if (!cached) setLoading(true);
+
+    await fetchFromApi(key, false);
+  }, [month, filterCategory]);
+
+  const fetchFromApi = async (key: string, silent: boolean) => {
+    const [m, cat] = key.split("|");
+    const params = new URLSearchParams({ month: m, limit: "50" });
+    if (cat) params.set("category", cat);
+
     const res = await fetch(`/api/expenses?${params}`);
     if (res.ok) {
       const data = await res.json();
-      setExpenses(data.expenses);
+      cache.current.set(key, data.expenses);
+      // Only update UI if we're still on the same key
+      if (`${month}|${filterCategory}` === key) {
+        setExpenses(data.expenses);
+      }
     }
-    setLoading(false);
-  }, [month, filterCategory]);
+    if (!silent) setLoading(false);
+  };
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { fetchExpenses(); }, [fetchExpenses]);
+
+  // After creating/editing, invalidate all cache for this month (data changed)
+  const invalidateAndRefetch = useCallback(() => {
+    // Clear all keys for current month (all category filters)
+    for (const key of cache.current.keys()) {
+      if (key.startsWith(`${month}|`)) {
+        cache.current.delete(key);
+      }
+    }
+    fetchExpenses({ invalidate: true });
+  }, [month, fetchExpenses]);
 
   const [year, monthNum] = month.split("-").map(Number);
   const monthName = new Date(year, monthNum - 1).toLocaleString("en", {
@@ -135,7 +175,7 @@ export default function ExpensesPage() {
             <ExpenseForm
               onSave={() => {
                 setShowForm(false);
-                fetchExpenses();
+                invalidateAndRefetch();
               }}
               onCancel={() => setShowForm(false)}
             />
@@ -144,7 +184,7 @@ export default function ExpensesPage() {
       )}
 
       {/* Expense list — animates on month/filter change */}
-      <AnimatedContent transitionKey={`${month}-${filterCategory}`} className="space-y-3">
+      <AnimatedContent transitionKey={cacheKey} className="space-y-3">
         {loading ? (
           <>
             {[1, 2, 3].map((i) => (
@@ -166,7 +206,7 @@ export default function ExpensesPage() {
                 isEditing={editingId === expense.id}
                 onEditStart={() => { setEditingId(expense.id); setShowForm(false); }}
                 onEditEnd={() => setEditingId(null)}
-                onUpdate={fetchExpenses}
+                onUpdate={invalidateAndRefetch}
               />
             </AnimatedSection>
           ))
