@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import Image from "next/image";
 import Link from "next/link";
 
 export default async function Home() {
@@ -15,6 +16,14 @@ export default async function Home() {
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-6">
       <div className="w-full max-w-sm text-center">
+        <Image
+          src="/logo-128.png"
+          alt=""
+          width={80}
+          height={80}
+          className="mx-auto mb-6 rounded-full"
+          priority
+        />
         <h1 className="font-display text-6xl font-light tracking-tight text-ink">
           Zen Finance
         </h1>

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
@@ -16,6 +17,14 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-full flex-col items-center justify-center px-6">
       <div className="w-full max-w-sm text-center">
+        <Image
+          src="/logo-128.png"
+          alt=""
+          width={64}
+          height={64}
+          className="mx-auto mb-5 rounded-full"
+          priority
+        />
         <h1 className="font-display text-5xl font-light tracking-tight text-ink">
           Zen Finance
         </h1>

@@ -3,6 +3,7 @@ import TelegramLink from "@/components/telegram-link";
 import SpendingSummary from "@/components/dashboard/spending-summary";
 import CategoryChart from "@/components/dashboard/category-chart";
 import RecentExpenses from "@/components/dashboard/recent-expenses";
+import AnimatedSection from "@/components/ui/animated-section";
 import { CATEGORIES } from "@/lib/utils/categories";
 import type { ExpenseCategory } from "@/types/database";
 
@@ -61,20 +62,28 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-8">
       {!hasTelegram && (
-        <div className="rounded-2xl border border-sand/50 bg-cream p-6 text-center shadow-sm">
-          <p className="font-display text-xl font-light">
-            Connect Telegram to start tracking
-          </p>
-          <p className="mt-2 text-sm text-ink-light">
-            Log expenses by voice, photo, or text — right from Telegram
-          </p>
-          <TelegramLink />
-        </div>
+        <AnimatedSection delay={0}>
+          <div className="rounded-2xl border border-sand/50 bg-cream p-6 text-center shadow-sm">
+            <p className="font-display text-xl font-light">
+              Connect Telegram to start tracking
+            </p>
+            <p className="mt-2 text-sm text-ink-light">
+              Log expenses by voice, photo, or text — right from Telegram
+            </p>
+            <TelegramLink />
+          </div>
+        </AnimatedSection>
       )}
 
-      <SpendingSummary total={total} month={month} />
-      <CategoryChart data={byCategory} />
-      <RecentExpenses expenses={(recent ?? []) as Parameters<typeof RecentExpenses>[0]["expenses"]} />
+      <AnimatedSection delay={0.1}>
+        <SpendingSummary total={total} month={month} />
+      </AnimatedSection>
+      <AnimatedSection delay={0.2}>
+        <CategoryChart data={byCategory} />
+      </AnimatedSection>
+      <AnimatedSection delay={0.3}>
+        <RecentExpenses expenses={(recent ?? []) as Parameters<typeof RecentExpenses>[0]["expenses"]} />
+      </AnimatedSection>
     </div>
   );
 }

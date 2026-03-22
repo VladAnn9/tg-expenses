@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { CATEGORY_EMOJI } from "@/lib/utils/categories";
 import type { ExpenseCategory } from "@/types/database";
 import ExpenseForm from "./expense-form";
@@ -15,23 +16,84 @@ interface ExpenseCardProps {
     expense_date: string;
     source: string;
   };
+  isEditing: boolean;
+  onEditStart: () => void;
+  onEditEnd: () => void;
   onUpdate: () => void;
 }
 
-export default function ExpenseCard({ expense, onUpdate }: ExpenseCardProps) {
-  const [editing, setEditing] = useState(false);
+function SaveIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+      <path d="M8 12.5l2.5 2.5 5-5" stroke="currentColor" strokeWidth="2.5" />
+    </svg>
+  );
+}
+
+function ClearIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} strokeLinecap="round">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
+      <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" strokeWidth="2.5" />
+    </svg>
+  );
+}
+
+export default function ExpenseCard({
+  expense,
+  isEditing,
+  onEditStart,
+  onEditEnd,
+  onUpdate,
+}: ExpenseCardProps) {
   const [editingNote, setEditingNote] = useState(false);
   const [noteValue, setNoteValue] = useState(expense.note ?? "");
   const [savingNote, setSavingNote] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
 
-  const saveNote = async () => {
+  // Close on Escape
+  useEffect(() => {
+    if (!isEditing) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onEditEnd();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [isEditing, onEditEnd]);
+
+  // Close on click outside
+  useEffect(() => {
+    if (!isEditing) return;
+    const handleClick = (e: MouseEvent) => {
+      if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
+        onEditEnd();
+      }
+    };
+    // Delay listener to avoid catching the opening click
+    const timer = setTimeout(() => {
+      document.addEventListener("mousedown", handleClick);
+    }, 10);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", handleClick);
+    };
+  }, [isEditing, onEditEnd]);
+
+  // Reset note value when expense updates
+  useEffect(() => {
+    setNoteValue(expense.note ?? "");
+  }, [expense.note]);
+
+  const saveNoteValue = async (value: string) => {
     setSavingNote(true);
     try {
       await fetch(`/api/expenses/${expense.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note: noteValue || null }),
+        body: JSON.stringify({ note: value || null }),
       });
+      setNoteValue(value);
       setEditingNote(false);
       onUpdate();
     } finally {
@@ -39,96 +101,118 @@ export default function ExpenseCard({ expense, onUpdate }: ExpenseCardProps) {
     }
   };
 
-  if (editing) {
-    return (
-      <div className="rounded-2xl border border-sand/50 bg-cream p-4">
-        <ExpenseForm
-          expense={expense}
-          onSave={() => {
-            setEditing(false);
-            onUpdate();
-          }}
-          onCancel={() => setEditing(false)}
-        />
-      </div>
-    );
-  }
-
   return (
-    <div className="rounded-xl border border-sand/30 bg-cream/30 p-4">
-      <div
-        className="flex cursor-pointer items-center justify-between"
-        onClick={() => setEditing(true)}
-      >
-        <div className="flex items-center gap-3">
-          <span className="text-xl">{CATEGORY_EMOJI[expense.category]}</span>
-          <div>
-            <p className="font-medium">
-              {expense.merchant || expense.category}
-            </p>
-            <p className="text-xs text-ink-light">
-              {expense.expense_date}
-              {expense.source !== "web" && (
-                <span className="ml-2 rounded bg-mist px-1.5 py-0.5 text-[10px]">
-                  {expense.source}
-                </span>
-              )}
-            </p>
-          </div>
-        </div>
-        <p className="font-display text-lg font-light">
-          {Number(expense.amount).toFixed(2)}
-          <span className="ml-1 text-xs text-ink-light">PLN</span>
-        </p>
-      </div>
-
-      {/* Inline note editing */}
-      <div className="mt-2 border-t border-sand/20 pt-2">
-        {editingNote ? (
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={noteValue}
-              onChange={(e) => setNoteValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveNote();
-                if (e.key === "Escape") setEditingNote(false);
-              }}
-              className="flex-1 rounded-lg border border-sand bg-cream/50 px-3 py-1.5 text-sm focus:border-sage focus:outline-none"
-              placeholder="Add a note..."
-              autoFocus
-            />
-            <button
-              onClick={saveNote}
-              disabled={savingNote}
-              className="text-xs text-sage hover:text-sage/80"
-            >
-              {savingNote ? "..." : "Save"}
-            </button>
-            {expense.note && (
-              <button
-                onClick={() => {
-                  setNoteValue("");
-                  saveNote();
-                }}
-                className="text-xs text-terracotta hover:text-terracotta/80"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        ) : (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setEditingNote(true);
-            }}
-            className="text-sm text-ink-light hover:text-ink"
+    <motion.div ref={cardRef} layout transition={{ layout: { duration: 0.25, ease: [0.25, 0.1, 0.25, 1] } }}>
+      <AnimatePresence mode="wait" initial={false}>
+        {isEditing ? (
+          <motion.div
+            key="edit"
+            initial={{ opacity: 0, scale: 0.97, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.97, y: -4 }}
+            transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+            className="rounded-2xl border border-sage/30 bg-cream p-4 shadow-sm"
           >
-            {expense.note || "Add note..."}
-          </button>
+            <ExpenseForm
+              expense={expense}
+              onSave={() => {
+                onEditEnd();
+                onUpdate();
+              }}
+              onCancel={onEditEnd}
+            />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="view"
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.97 }}
+            transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+            className="rounded-xl border border-sand/30 bg-cream/30 p-4 cursor-pointer"
+            onClick={onEditStart}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-xl flex-shrink-0">
+                  {CATEGORY_EMOJI[expense.category]}
+                </span>
+                <div className="min-w-0">
+                  <p className="font-medium truncate">
+                    {expense.merchant || expense.category}
+                  </p>
+                  <p className="text-xs text-ink-light">
+                    {expense.expense_date}
+                    {expense.source !== "web" && (
+                      <span className="ml-2 rounded bg-mist px-1.5 py-0.5 text-[10px]">
+                        {expense.source}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <p className="font-display text-lg font-light flex-shrink-0 ml-3">
+                {Number(expense.amount).toFixed(2)}
+                <span className="ml-1 text-xs text-ink-light">PLN</span>
+              </p>
+            </div>
+
+            {/* Inline note */}
+            <div className="mt-2 border-t border-sand/20 pt-2">
+              {editingNote ? (
+                <div
+                  className="flex items-center gap-1.5"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="text"
+                    value={noteValue}
+                    onChange={(e) => setNoteValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveNoteValue(noteValue);
+                      if (e.key === "Escape") {
+                        setNoteValue(expense.note ?? "");
+                        setEditingNote(false);
+                      }
+                    }}
+                    className="flex-1 min-w-0 rounded-lg border border-sand bg-cream/50 px-3 py-1.5 text-sm focus:border-sage focus:outline-none"
+                    placeholder="Add a note..."
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => saveNoteValue(noteValue)}
+                    disabled={savingNote}
+                    className="flex-shrink-0 rounded-lg p-1.5 text-sage transition-colors hover:bg-sage/10 active:scale-90 disabled:opacity-40"
+                    title="Save note"
+                  >
+                    <SaveIcon className="h-5 w-5" />
+                  </button>
+                  {expense.note && (
+                    <button
+                      onClick={() => saveNoteValue("")}
+                      disabled={savingNote}
+                      className="flex-shrink-0 rounded-lg p-1.5 text-terracotta transition-colors hover:bg-terracotta/10 active:scale-90 disabled:opacity-40"
+                      title="Clear note"
+                    >
+                      <ClearIcon className="h-5 w-5" />
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingNote(true);
+                  }}
+                  className="text-sm text-ink-light hover:text-ink transition-colors"
+                >
+                  {expense.note || "Add note..."}
+                </button>
+              )}
+            </div>
+          </motion.div>
         )}
-      </div>
-    </div>
+      </AnimatePresence>
+    </motion.div>
   );
 }

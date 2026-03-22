@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import ExpenseCard from "@/components/expenses/expense-card";
 import ExpenseForm from "@/components/expenses/expense-form";
+import AnimatedSection from "@/components/ui/animated-section";
+import AnimatedContent from "@/components/ui/animated-content";
 import { CATEGORIES, CATEGORY_EMOJI } from "@/lib/utils/categories";
 import type { ExpenseCategory } from "@/types/database";
 
@@ -20,6 +22,7 @@ export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [month, setMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -64,97 +67,111 @@ export default function ExpensesPage() {
   return (
     <div className="space-y-6">
       {/* Month navigation */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={prevMonth}
-          className="text-ink-light transition-colors hover:text-ink"
-        >
-          ← Prev
-        </button>
-        <h2 className="font-display text-xl font-light">{monthName}</h2>
-        <button
-          onClick={nextMonth}
-          className="text-ink-light transition-colors hover:text-ink"
-        >
-          Next →
-        </button>
-      </div>
+      <AnimatedSection>
+        <div className="flex items-center justify-between">
+          <button
+            onClick={prevMonth}
+            className="rounded-lg px-3 py-2 text-ink-light transition-colors hover:bg-mist/50 hover:text-ink active:scale-95"
+          >
+            ← Prev
+          </button>
+          <AnimatedContent transitionKey={month}>
+            <h2 className="font-display text-xl font-light">{monthName}</h2>
+          </AnimatedContent>
+          <button
+            onClick={nextMonth}
+            className="rounded-lg px-3 py-2 text-ink-light transition-colors hover:bg-mist/50 hover:text-ink active:scale-95"
+          >
+            Next →
+          </button>
+        </div>
+      </AnimatedSection>
 
       {/* Category filter */}
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => setFilterCategory("")}
-          className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
-            !filterCategory
-              ? "border-sage bg-sage/10 text-ink"
-              : "border-sand/50 text-ink-light hover:border-sand"
-          }`}
-        >
-          All
-        </button>
-        {CATEGORIES.map((cat) => (
+      <AnimatedSection delay={0.05}>
+        <div className="flex flex-wrap gap-2">
           <button
-            key={cat}
-            onClick={() =>
-              setFilterCategory(filterCategory === cat ? "" : cat)
-            }
+            onClick={() => setFilterCategory("")}
             className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
-              filterCategory === cat
+              !filterCategory
                 ? "border-sage bg-sage/10 text-ink"
                 : "border-sand/50 text-ink-light hover:border-sand"
             }`}
           >
-            {CATEGORY_EMOJI[cat]} {cat}
+            All
           </button>
-        ))}
-      </div>
+          {CATEGORIES.map((cat) => (
+            <button
+              key={cat}
+              onClick={() =>
+                setFilterCategory(filterCategory === cat ? "" : cat)
+              }
+              className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                filterCategory === cat
+                  ? "border-sage bg-sage/10 text-ink"
+                  : "border-sand/50 text-ink-light hover:border-sand"
+              }`}
+            >
+              {CATEGORY_EMOJI[cat]} {cat}
+            </button>
+          ))}
+        </div>
+      </AnimatedSection>
 
       {/* Add expense button */}
-      <button
-        onClick={() => setShowForm(true)}
-        className="w-full rounded-xl border-2 border-dashed border-sand py-3 text-sm text-ink-light transition-colors hover:border-sage hover:text-ink"
-      >
-        + Add Expense
-      </button>
+      <AnimatedSection delay={0.1}>
+        <button
+          onClick={() => { setShowForm(true); setEditingId(null); }}
+          className="w-full rounded-xl border-2 border-dashed border-sand py-3 text-sm text-ink-light transition-colors hover:border-sage hover:text-ink"
+        >
+          + Add Expense
+        </button>
+      </AnimatedSection>
 
       {/* Add expense form */}
       {showForm && (
-        <div className="rounded-2xl border border-sand/50 bg-cream p-4">
-          <ExpenseForm
-            onSave={() => {
-              setShowForm(false);
-              fetchExpenses();
-            }}
-            onCancel={() => setShowForm(false)}
-          />
-        </div>
+        <AnimatedSection>
+          <div className="rounded-2xl border border-sand/50 bg-cream p-4">
+            <ExpenseForm
+              onSave={() => {
+                setShowForm(false);
+                fetchExpenses();
+              }}
+              onCancel={() => setShowForm(false)}
+            />
+          </div>
+        </AnimatedSection>
       )}
 
-      {/* Expense list */}
-      {loading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="h-20 animate-pulse rounded-xl bg-mist/50"
-            />
-          ))}
-        </div>
-      ) : expenses.length === 0 ? (
-        <p className="text-center text-sm text-ink-light">
-          No expenses for this period.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {expenses.map((expense) => (
-            <ExpenseCard
-              key={expense.id}
-              expense={expense}
-              onUpdate={fetchExpenses}
-            />
-          ))}
-        </div>
-      )}
+      {/* Expense list — animates on month/filter change */}
+      <AnimatedContent transitionKey={`${month}-${filterCategory}`} className="space-y-3">
+        {loading ? (
+          <>
+            {[1, 2, 3].map((i) => (
+              <div
+                key={i}
+                className="h-20 animate-pulse rounded-xl bg-mist/50"
+              />
+            ))}
+          </>
+        ) : expenses.length === 0 ? (
+          <p className="py-8 text-center text-sm text-ink-light">
+            No expenses for this period.
+          </p>
+        ) : (
+          expenses.map((expense, i) => (
+            <AnimatedSection key={expense.id} delay={i * 0.03}>
+              <ExpenseCard
+                expense={expense}
+                isEditing={editingId === expense.id}
+                onEditStart={() => { setEditingId(expense.id); setShowForm(false); }}
+                onEditEnd={() => setEditingId(null)}
+                onUpdate={fetchExpenses}
+              />
+            </AnimatedSection>
+          ))
+        )}
+      </AnimatedContent>
     </div>
   );
 }

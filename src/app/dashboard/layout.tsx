@@ -1,4 +1,6 @@
 import { redirect } from "next/navigation";
+import Image from "next/image";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function DashboardLayout({
@@ -26,9 +28,19 @@ export default async function DashboardLayout({
     <div className="flex min-h-full flex-col">
       <header className="border-b border-sand/50 bg-cream/50 backdrop-blur-sm">
         <div className="mx-auto flex max-w-2xl items-center justify-between px-6 py-4">
-          <h1 className="font-display text-2xl font-light tracking-tight">
-            Zen Finance
-          </h1>
+          <Link href="/dashboard" className="flex items-center gap-2.5">
+            <Image
+              src="/logo-64.png"
+              alt="Zen Finance"
+              width={32}
+              height={32}
+              className="rounded-full"
+              priority
+            />
+            <span className="font-display text-xl font-light tracking-tight">
+              Zen Finance
+            </span>
+          </Link>
           <div className="flex items-center gap-4">
             <span className="text-sm text-ink-light">
               {user.user_metadata?.full_name?.split(" ")[0] ?? user.email}

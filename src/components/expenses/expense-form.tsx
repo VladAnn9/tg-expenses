@@ -91,19 +91,20 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
 
       <div>
         <label className="block text-sm text-ink-light">Category</label>
-        <div className="mt-1 grid grid-cols-4 gap-2">
+        <div className="mt-1 flex flex-wrap gap-2">
           {CATEGORIES.map((cat) => (
             <button
               key={cat}
               type="button"
               onClick={() => setCategory(cat)}
-              className={`rounded-lg border px-2 py-2 text-xs transition-colors ${
+              className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs whitespace-nowrap transition-colors ${
                 category === cat
                   ? "border-sage bg-sage/10 text-ink"
                   : "border-sand/50 bg-cream/30 text-ink-light hover:border-sand"
               }`}
             >
-              {CATEGORY_EMOJI[cat]} {cat}
+              <span>{CATEGORY_EMOJI[cat]}</span>
+              <span>{cat}</span>
             </button>
           ))}
         </div>
