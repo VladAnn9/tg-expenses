@@ -18,6 +18,8 @@ export async function GET(req: NextRequest) {
     searchParams.get("month") ||
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const category = searchParams.get("category");
+  const accountId = searchParams.get("account_id");
+  const subcategoryId = searchParams.get("subcategory_id");
   const limit = Math.min(Number(searchParams.get("limit") || 50), 100);
   const offset = Number(searchParams.get("offset") || 0);
 
@@ -39,6 +41,14 @@ export async function GET(req: NextRequest) {
 
   if (category && isValidCategory(category)) {
     query = query.eq("category", category);
+  }
+
+  if (accountId) {
+    query = query.eq("account_id", accountId);
+  }
+
+  if (subcategoryId) {
+    query = query.eq("subcategory_id", subcategoryId);
   }
 
   const { data, count } = await query;
@@ -74,7 +84,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { amount, category, merchant, note, expense_date } = body;
+  const { amount, category, merchant, note, expense_date, account_id } = body;
 
   if (!amount || Number(amount) <= 0) {
     return NextResponse.json(
@@ -90,15 +100,32 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Get default account
-  const { data: account } = await supabase
-    .from("accounts")
-    .select("id")
-    .eq("user_id", user.id)
-    .limit(1)
-    .single();
+  // Use provided account_id or find primary account
+  let resolvedAccountId = account_id;
+  if (!resolvedAccountId) {
+    const { data: account } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("is_primary", true)
+      .limit(1)
+      .single();
 
-  if (!account) {
+    if (!account) {
+      // Fallback to first account
+      const { data: fallback } = await supabase
+        .from("accounts")
+        .select("id")
+        .eq("user_id", user.id)
+        .limit(1)
+        .single();
+      resolvedAccountId = fallback?.id;
+    } else {
+      resolvedAccountId = account.id;
+    }
+  }
+
+  if (!resolvedAccountId) {
     return NextResponse.json(
       { error: "No account found" },
       { status: 400 }
@@ -108,7 +135,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = await supabase
     .from("expenses")
     .insert({
-      account_id: account.id,
+      account_id: resolvedAccountId,
       amount: Number(amount),
       currency: "PLN",
       category,

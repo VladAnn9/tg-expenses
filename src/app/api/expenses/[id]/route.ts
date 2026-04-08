@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidCategory } from "@/lib/utils/categories";
 
 export async function PATCH(
@@ -38,6 +39,7 @@ export async function PATCH(
   if (body.merchant !== undefined) updates.merchant = body.merchant || null;
   if (body.note !== undefined) updates.note = body.note || null;
   if (body.expense_date !== undefined) updates.expense_date = body.expense_date;
+  if (body.subcategory_id !== undefined) updates.subcategory_id = body.subcategory_id || null;
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
@@ -56,4 +58,29 @@ export async function PATCH(
   }
 
   return NextResponse.json(data);
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const { id } = await params;
+  const admin = createAdminClient();
+
+  await admin
+    .from("expenses")
+    .delete()
+    .eq("id", id)
+    .eq("created_by", user.id);
+
+  return NextResponse.json({ success: true });
 }

@@ -3,6 +3,14 @@ import Image from "next/image";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
+const NAV_LINKS = [
+  { href: "/dashboard", label: "Home" },
+  { href: "/dashboard/expenses", label: "Expenses" },
+  { href: "/dashboard/accounts", label: "Accounts" },
+  { href: "/dashboard/household", label: "Household" },
+  { href: "/dashboard/settings", label: "Settings" },
+];
+
 export default async function DashboardLayout({
   children,
 }: {
@@ -55,6 +63,19 @@ export default async function DashboardLayout({
             </form>
           </div>
         </div>
+        <nav className="mx-auto max-w-2xl overflow-x-auto px-6 pb-2">
+          <div className="flex gap-1">
+            {NAV_LINKS.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="whitespace-nowrap rounded-lg px-3 py-1.5 text-xs text-ink-light transition-colors hover:bg-mist/50 hover:text-ink"
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
+        </nav>
       </header>
       <main className="mx-auto w-full max-w-2xl flex-1 px-6 py-8">
         {children}

@@ -22,6 +22,7 @@
   --color-cream: var(--cream);
   --font-display: var(--font-cormorant);
   --font-body: var(--font-dm-sans);
+  --font-number: var(--font-number);
 }
 
 body {

@@ -6,10 +6,13 @@ import { createClient } from "@/lib/supabase/client";
 export default function LoginPage() {
   const handleSignIn = async () => {
     const supabase = createClient();
+    // Preserve redirectTo so invite links survive the login flow
+    const params = new URLSearchParams(window.location.search);
+    const redirectTo = params.get("redirectTo") || "/dashboard";
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?redirectTo=${encodeURIComponent(redirectTo)}`,
       },
     });
   };

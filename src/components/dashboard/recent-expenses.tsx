@@ -9,13 +9,15 @@ interface RecentExpense {
   merchant: string | null;
   expense_date: string;
   note: string | null;
+  created_by?: string;
 }
 
 interface RecentExpensesProps {
   expenses: RecentExpense[];
+  memberNames?: Record<string, string>;
 }
 
-export default function RecentExpenses({ expenses }: RecentExpensesProps) {
+export default function RecentExpenses({ expenses, memberNames }: RecentExpensesProps) {
   if (expenses.length === 0) {
     return (
       <section>
@@ -44,28 +46,42 @@ export default function RecentExpenses({ expenses }: RecentExpensesProps) {
         </Link>
       </div>
       <div className="mt-4 space-y-3">
-        {expenses.map((expense) => (
-          <div
-            key={expense.id}
-            className="flex items-center justify-between rounded-xl border border-sand/30 bg-cream/30 px-4 py-3"
-          >
-            <div className="flex items-center gap-3">
-              <span className="text-lg">
-                {CATEGORY_EMOJI[expense.category]}
-              </span>
-              <div>
-                <p className="text-sm font-medium">
-                  {expense.merchant || expense.note || expense.category}
-                </p>
-                <p className="text-xs text-ink-light">{expense.expense_date}</p>
+        {expenses.map((expense) => {
+          const loggedBy =
+            memberNames && expense.created_by
+              ? memberNames[expense.created_by]
+              : undefined;
+
+          return (
+            <div
+              key={expense.id}
+              className="flex items-center justify-between rounded-xl border border-sand/30 bg-cream/30 px-4 py-3"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-lg">
+                  {CATEGORY_EMOJI[expense.category]}
+                </span>
+                <div>
+                  <p className="text-sm font-medium">
+                    {expense.merchant || expense.note || expense.category}
+                  </p>
+                  <p className="text-xs text-ink-light">
+                    {expense.expense_date}
+                    {loggedBy && (
+                      <span className="ml-2 rounded bg-sage/10 px-1.5 py-0.5 text-[10px] text-sage">
+                        {loggedBy}
+                      </span>
+                    )}
+                  </p>
+                </div>
               </div>
+              <p className="font-number text-lg font-light tabular-nums">
+                {Number(expense.amount).toFixed(2)}
+                <span className="ml-1 font-body text-xs text-ink-light">PLN</span>
+              </p>
             </div>
-            <p className="font-display text-lg font-light">
-              {Number(expense.amount).toFixed(2)}
-              <span className="ml-1 text-xs text-ink-light">PLN</span>
-            </p>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

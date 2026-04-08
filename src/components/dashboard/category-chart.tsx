@@ -1,21 +1,31 @@
 "use client";
 
+import { useState } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { CATEGORY_EMOJI } from "@/lib/utils/categories";
 import type { ExpenseCategory } from "@/types/database";
 
-interface CategoryData {
+interface SubcategoryData {
+  name: string;
+  total: number;
+  count: number;
+}
+
+export interface CategoryData {
   category: ExpenseCategory;
   total: number;
   count: number;
   percentage: number;
+  subcategories?: SubcategoryData[];
 }
 
 const COLORS: Record<ExpenseCategory, string> = {
   Food: "#8B9D83",
+  Dining: "#A67C52",
+  Housing: "#8A7B6B",
+  Bills: "#6B6560",
   Transport: "#C07654",
   Shopping: "#D4C5B2",
-  Bills: "#6B6560",
   Entertainment: "#A68B6B",
   Health: "#7A8B7A",
   Other: "#B0A090",
@@ -26,6 +36,7 @@ interface CategoryChartProps {
 }
 
 export default function CategoryChart({ data }: CategoryChartProps) {
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
   const activeCategories = data.filter((d) => d.total > 0);
 
   if (activeCategories.length === 0) {
@@ -80,28 +91,66 @@ export default function CategoryChart({ data }: CategoryChartProps) {
         </ResponsiveContainer>
       </div>
 
-      {/* Legend below — compact rows */}
-      <div className="mt-4 space-y-1.5">
-        {activeCategories.map((item) => (
-          <div
-            key={item.category}
-            className="flex items-center justify-between"
-          >
-            <div className="flex items-center gap-2">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: COLORS[item.category] }}
-              />
-              <span className="text-sm">
-                {CATEGORY_EMOJI[item.category]} {item.category}
-              </span>
+      {/* Legend with expandable subcategories */}
+      <div className="mt-4 space-y-1">
+        {activeCategories.map((item) => {
+          const hasSubs = item.subcategories && item.subcategories.length > 0;
+          const isExpanded = expandedCategory === item.category;
+
+          return (
+            <div key={item.category}>
+              <button
+                onClick={() =>
+                  hasSubs
+                    ? setExpandedCategory(isExpanded ? null : item.category)
+                    : undefined
+                }
+                className={`flex w-full items-center justify-between rounded-lg px-1 py-1 transition-colors ${
+                  hasSubs ? "hover:bg-mist/30 cursor-pointer" : "cursor-default"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: COLORS[item.category] }}
+                  />
+                  <span className="text-sm">
+                    {CATEGORY_EMOJI[item.category]} {item.category}
+                  </span>
+                  {hasSubs && (
+                    <span className="text-xs text-ink-light/50">
+                      {isExpanded ? "▴" : "▾"}
+                    </span>
+                  )}
+                </div>
+                <span className="font-number tabular-nums text-sm text-ink-light">
+                  {item.total.toFixed(0)} PLN
+                  <span className="ml-1 text-xs">({item.percentage}%)</span>
+                </span>
+              </button>
+
+              {/* Subcategory breakdown */}
+              {isExpanded && item.subcategories && (
+                <div className="ml-5 mt-0.5 mb-1 space-y-0.5 border-l-2 border-sand/30 pl-3">
+                  {item.subcategories.map((sub) => (
+                    <div
+                      key={sub.name}
+                      className="flex items-center justify-between text-xs"
+                    >
+                      <span className="text-ink-light">{sub.name}</span>
+                      <span className="tabular-nums text-ink-light/70">
+                        {sub.total.toFixed(0)} PLN
+                        <span className="ml-1 text-[10px]">
+                          ({sub.count})
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <span className="tabular-nums text-sm text-ink-light">
-              {item.total.toFixed(0)} PLN
-              <span className="ml-1 text-xs">({item.percentage}%)</span>
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

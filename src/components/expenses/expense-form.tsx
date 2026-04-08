@@ -1,8 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CATEGORIES, CATEGORY_EMOJI } from "@/lib/utils/categories";
-import type { ExpenseCategory } from "@/types/database";
+import type { ExpenseCategory, AccountType } from "@/types/database";
+
+interface Account {
+  id: string;
+  name: string;
+  type: AccountType;
+  is_primary: boolean;
+}
+
+interface Subcategory {
+  id: string;
+  name: string;
+}
 
 interface ExpenseFormProps {
   expense?: {
@@ -12,6 +24,8 @@ interface ExpenseFormProps {
     merchant: string | null;
     note: string | null;
     expense_date: string;
+    account_id?: string;
+    subcategory_id?: string | null;
   };
   onSave: () => void;
   onCancel: () => void;
@@ -26,8 +40,67 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
   const [date, setDate] = useState(
     expense?.expense_date ?? new Date().toISOString().split("T")[0]
   );
+  const [accountId, setAccountId] = useState(expense?.account_id ?? "");
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [subcategoryId, setSubcategoryId] = useState(expense?.subcategory_id ?? "");
+  const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showNewSubcategory, setShowNewSubcategory] = useState(false);
+  const [newSubcategoryName, setNewSubcategoryName] = useState("");
+  const [creatingSub, setCreatingSub] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/accounts")
+      .then((r) => r.json())
+      .then((data) => {
+        const accts: Account[] = data.accounts ?? [];
+        setAccounts(accts);
+        if (!accountId && accts.length > 0) {
+          const primary = accts.find((a) => a.is_primary);
+          setAccountId(primary?.id ?? accts[0].id);
+        }
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch subcategories when category changes
+  useEffect(() => {
+    if (!category) return;
+    fetch(`/api/subcategories?category=${category}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setSubcategories(data.subcategories ?? []);
+        // Clear subcategory if it doesn't belong to the new category
+        if (subcategoryId) {
+          const stillValid = (data.subcategories ?? []).some(
+            (s: Subcategory) => s.id === subcategoryId
+          );
+          if (!stillValid) setSubcategoryId("");
+        }
+      });
+  }, [category]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleCreateSubcategory = async () => {
+    const name = newSubcategoryName.trim();
+    if (!name) return;
+    setCreatingSub(true);
+    try {
+      const res = await fetch("/api/subcategories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, parent_category: category }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setSubcategories((prev) => [...prev, { id: created.id, name: created.name }]);
+        setSubcategoryId(created.id);
+        setNewSubcategoryName("");
+        setShowNewSubcategory(false);
+      }
+    } finally {
+      setCreatingSub(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,6 +126,8 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
           merchant: merchant || null,
           note: note || null,
           expense_date: date,
+          subcategory_id: subcategoryId || null,
+          ...(accountId && !isEdit ? { account_id: accountId } : {}),
         }),
       });
 
@@ -89,6 +164,23 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
         />
       </div>
 
+      {accounts.length > 1 && !isEdit && (
+        <div>
+          <label className="block text-sm text-ink-light">Account</label>
+          <select
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-sand bg-cream/50 px-4 py-3 text-ink focus:border-sage focus:outline-none"
+          >
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}{a.is_primary ? " (Primary)" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div>
         <label className="block text-sm text-ink-light">Category</label>
         <div className="mt-1 flex flex-wrap gap-2">
@@ -107,6 +199,77 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
               <span>{cat}</span>
             </button>
           ))}
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm text-ink-light">Subcategory</label>
+        <div className="mt-1 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setSubcategoryId("")}
+            className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+              !subcategoryId
+                ? "border-sage bg-sage/10 text-ink"
+                : "border-sand/50 bg-cream/30 text-ink-light hover:border-sand"
+            }`}
+          >
+            None
+          </button>
+          {subcategories.map((sub) => (
+            <button
+              key={sub.id}
+              type="button"
+              onClick={() => setSubcategoryId(sub.id)}
+              className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                subcategoryId === sub.id
+                  ? "border-sage bg-sage/10 text-ink"
+                  : "border-sand/50 bg-cream/30 text-ink-light hover:border-sand"
+              }`}
+            >
+              {sub.name}
+            </button>
+          ))}
+          {!showNewSubcategory ? (
+            <button
+              type="button"
+              onClick={() => setShowNewSubcategory(true)}
+              className="rounded-lg border border-dashed border-sand/50 px-2.5 py-1.5 text-xs text-ink-light transition-colors hover:border-sage hover:text-ink"
+            >
+              +
+            </button>
+          ) : (
+            <div
+              className="flex items-center gap-1.5"
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  setShowNewSubcategory(false);
+                  setNewSubcategoryName("");
+                }
+              }}
+            >
+              <input
+                type="text"
+                value={newSubcategoryName}
+                onChange={(e) => setNewSubcategoryName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); handleCreateSubcategory(); }
+                  if (e.key === "Escape") { setShowNewSubcategory(false); setNewSubcategoryName(""); }
+                }}
+                placeholder="Name..."
+                className="w-24 rounded-lg border border-sand bg-cream/50 px-2 py-1.5 text-xs focus:border-sage focus:outline-none"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={handleCreateSubcategory}
+                disabled={creatingSub || !newSubcategoryName.trim()}
+                className="rounded-lg bg-sage/10 px-2 py-1.5 text-xs text-sage transition-colors hover:bg-sage/20 disabled:opacity-40"
+              >
+                {creatingSub ? "..." : "Add"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

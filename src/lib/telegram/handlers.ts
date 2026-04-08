@@ -7,7 +7,11 @@ import {
   parseVoiceExpense,
   parseReceiptImage,
   isParseError,
+  isParsedIncome,
+  normalizeMerchant,
+  generateRoast,
 } from "@/lib/ai/gemini";
+import type { ParsedExpense, ParsedIncome } from "@/lib/ai/gemini";
 import { nanoid } from "nanoid";
 
 type TelegramLinkRequest =
@@ -15,9 +19,12 @@ type TelegramLinkRequest =
 
 // Pending expense store (in-memory, per-process)
 interface PendingExpense {
+  type: "expense";
   amount: number;
   category: ExpenseCategory;
+  subcategory: string | null;
   merchant: string | null;
+  originalMerchant: string | null;
   note: string | null;
   expense_date: string;
   source: "text" | "voice" | "receipt";
@@ -26,7 +33,23 @@ interface PendingExpense {
   accountId: string;
 }
 
-const pendingExpenses = new Map<string, PendingExpense>();
+interface PendingIncome {
+  type: "income";
+  amount: number;
+  source_label: string | null;
+  note: string | null;
+  income_date: string;
+  source: "text" | "voice";
+  userId: string;
+  accountId: string;
+}
+
+type PendingItem = PendingExpense | PendingIncome;
+
+const pendingItems = new Map<string, PendingItem>();
+
+// Undo store: expenseId → { createdAt, userId }
+const undoStore = new Map<string, { expenseId: string; createdAt: number }>();
 
 // ---- Helpers ----
 
@@ -34,32 +57,118 @@ async function findUserByTelegramId(telegramId: number) {
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("profiles")
-    .select("id")
+    .select("id, household_id, roast_enabled")
     .eq("telegram_id", telegramId)
     .single();
   return data;
 }
 
-async function getUserDefaultAccount(userId: string) {
+async function getUserPrimaryAccount(userId: string) {
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("accounts")
-    .select("id")
+    .select("id, name")
     .eq("user_id", userId)
+    .eq("is_primary", true)
     .limit(1)
     .single();
-  return data;
+  if (data) return data;
+  // Fallback to first account
+  const { data: fallback } = await supabase
+    .from("accounts")
+    .select("id, name")
+    .eq("user_id", userId)
+    .order("created_at")
+    .limit(1)
+    .single();
+  return fallback;
 }
 
-function formatConfirmation(expense: PendingExpense): string {
-  const emoji = CATEGORY_EMOJI[expense.category];
-  let text = `💰 New expense parsed:\n\n`;
-  text += `Amount: ${expense.amount.toFixed(2)} PLN\n`;
-  text += `Category: ${emoji} ${expense.category}\n`;
-  if (expense.merchant) text += `Merchant: ${expense.merchant}\n`;
-  text += `Date: ${expense.expense_date}\n`;
-  if (expense.note) text += `Note: ${expense.note}\n`;
-  return text;
+async function getUserSubcategories(userId: string): Promise<string[]> {
+  const supabase = createAdminClient();
+  const { data } = await supabase
+    .from("subcategories")
+    .select("name")
+    .eq("created_by", userId);
+  return (data ?? []).map((s) => s.name);
+}
+
+async function getKnownMerchants(householdId: string | null): Promise<string[]> {
+  const supabase = createAdminClient();
+  if (householdId) {
+    const { data } = await supabase
+      .from("merchant_aliases")
+      .select("canonical_name")
+      .eq("household_id", householdId);
+    return [...new Set((data ?? []).map((m) => m.canonical_name))];
+  }
+  return [];
+}
+
+async function storeMerchantAlias(
+  variant: string,
+  canonical: string,
+  householdId: string | null
+) {
+  if (variant.toLowerCase() === canonical.toLowerCase()) return;
+  const supabase = createAdminClient();
+  await supabase.from("merchant_aliases").upsert(
+    { variant: variant.toLowerCase(), canonical_name: canonical, household_id: householdId },
+    { onConflict: "variant,household_id" }
+  );
+}
+
+async function ensureSubcategory(
+  name: string,
+  parentCategory: ExpenseCategory,
+  userId: string,
+  householdId: string | null
+): Promise<string | null> {
+  if (!name) return null;
+  const supabase = createAdminClient();
+  // Check existing
+  const { data: existing } = await supabase
+    .from("subcategories")
+    .select("id")
+    .eq("name", name)
+    .eq("parent_category", parentCategory)
+    .limit(1)
+    .single();
+  if (existing) return existing.id;
+  // Create new
+  const { data: created } = await supabase
+    .from("subcategories")
+    .insert({
+      name,
+      parent_category: parentCategory,
+      household_id: householdId,
+      created_by: userId,
+    })
+    .select("id")
+    .single();
+  return created?.id ?? null;
+}
+
+function formatConfirmation(item: PendingItem): string {
+  if (item.type === "income") {
+    return `💰 Income: ${item.amount.toFixed(2)} PLN — ${item.source_label || "Income"}`;
+  }
+  const emoji = CATEGORY_EMOJI[item.category];
+  const subcat = item.subcategory ? ` > ${item.subcategory}` : "";
+  let line1 = `💰 ${item.amount.toFixed(2)} PLN — ${emoji} ${item.category}${subcat}`;
+  const parts: string[] = [];
+  if (item.merchant) {
+    let merchantText = `📍 ${item.merchant}`;
+    if (item.originalMerchant && item.originalMerchant !== item.merchant) {
+      merchantText += ` (you typed '${item.originalMerchant}')`;
+    }
+    parts.push(merchantText);
+  }
+  parts.push(`📅 ${item.expense_date}`);
+  if (parts.length > 0) {
+    line1 += `\n${parts.join(" | ")}`;
+  }
+  return line1;
 }
 
 function confirmationKeyboard(pendingId: string): InlineKeyboard {
@@ -85,11 +194,11 @@ export function registerHandlers(bot: Bot) {
             "• Typing: `15 coffee` or `Biedronka 87`\n" +
             "• Sending a 🎙 voice memo\n" +
             "• Sending a 📸 receipt photo",
-          { parse_mode: "Markdown" },
+          { parse_mode: "Markdown" }
         );
       }
       return ctx.reply(
-        "Welcome! Link your account first at the Zen Finance web app to start tracking expenses.",
+        "Welcome! Link your account first at the Zen Finance web app to start tracking expenses."
       );
     }
 
@@ -104,17 +213,16 @@ export function registerHandlers(bot: Bot) {
 
     if (!linkReq) {
       return ctx.reply(
-        "This link is invalid or has already been used. Generate a new one from the web app.",
+        "This link is invalid or has already been used. Generate a new one from the web app."
       );
     }
 
     if (new Date(linkReq.expires_at) < new Date()) {
       return ctx.reply(
-        "This link has expired. Generate a new one from the web app.",
+        "This link has expired. Generate a new one from the web app."
       );
     }
 
-    // Link the account
     const { error: updateError } = await supabase
       .from("profiles")
       .update({ telegram_id: ctx.from!.id })
@@ -122,95 +230,191 @@ export function registerHandlers(bot: Bot) {
 
     if (updateError) {
       return ctx.reply(
-        "Something went wrong linking your account. Please try again.",
+        "Something went wrong linking your account. Please try again."
       );
     }
 
-    // Mark token as used
     await supabase
       .from("telegram_link_requests")
       .update({ used_at: new Date().toISOString() })
       .eq("id", linkReq.id);
 
     return ctx.reply(
-      '✅ Account linked! You can now send expenses here.\n\nTry: "15 coffee" or send a voice memo.',
+      '✅ Account linked! You can now send expenses here.\n\nTry: "15 coffee" or send a voice memo.'
     );
   });
 
   // Handle unlinked users for all message types
   bot.use(async (ctx, next) => {
-    // Skip for /start command (handled above)
     if (ctx.message?.text?.startsWith("/start")) return;
-    // Skip callback queries (handled separately)
     if (ctx.callbackQuery) return next();
-
     if (!ctx.from) return;
 
     const user = await findUserByTelegramId(ctx.from.id);
     if (!user) {
       return ctx.reply(
-        'You need to link your Telegram account first.\n\nVisit the Zen Finance web app and click "Link Telegram" to get started.',
+        'You need to link your Telegram account first.\n\nVisit the Zen Finance web app and click "Link Telegram" to get started.'
       );
     }
 
-    // Attach user info to context for downstream handlers
-    (ctx as Context & { userId?: string }).userId = user.id;
+    (ctx as Context & { userProfile?: typeof user }).userProfile = user;
     return next();
   });
 
-  // Callback query handler (confirm / edit / cancel)
+  // Callback query handler
   bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
     const [action, pendingId] = data.split(":");
 
+    // ---- Undo handler ----
+    if (action === "undo") {
+      const undoInfo = undoStore.get(pendingId);
+      if (!undoInfo) {
+        return ctx.answerCallbackQuery({ text: "Nothing to undo." });
+      }
+      const elapsed = Date.now() - undoInfo.createdAt;
+      if (elapsed > 30000) {
+        undoStore.delete(pendingId);
+        await ctx.answerCallbackQuery({ text: "Too late — 30s window has passed." });
+        return;
+      }
+      const supabase = createAdminClient();
+      await supabase.from("expenses").delete().eq("id", undoInfo.expenseId);
+      undoStore.delete(pendingId);
+      await ctx.answerCallbackQuery({ text: "Expense deleted!" });
+      await ctx.editMessageText("↩️ Expense undone.");
+      return;
+    }
+
     if (action === "confirm") {
-      const pending = pendingExpenses.get(pendingId);
+      const pending = pendingItems.get(pendingId);
       if (!pending) {
-        return ctx.answerCallbackQuery({
-          text: "Expense expired. Send a new one.",
-        });
+        return ctx.answerCallbackQuery({ text: "Expired. Send a new one." });
       }
 
       const supabase = createAdminClient();
-      const { error } = await supabase.from("expenses").insert({
-        account_id: pending.accountId,
-        amount: pending.amount,
-        currency: "PLN",
-        category: pending.category,
-        merchant: pending.merchant,
-        note: pending.note,
-        source: pending.source,
-        transcript: pending.transcript,
-        telegram_message_id: ctx.callbackQuery.message?.message_id ?? null,
-        expense_date: pending.expense_date,
-        created_by: pending.userId,
-      });
 
-      pendingExpenses.delete(pendingId);
+      if (pending.type === "income") {
+        const { error } = await supabase.from("income_entries").insert({
+          account_id: pending.accountId,
+          amount: pending.amount,
+          currency: "PLN",
+          source_label: pending.source_label,
+          note: pending.note,
+          income_date: pending.income_date,
+          created_by: pending.userId,
+        });
+        pendingItems.delete(pendingId);
+        if (error) {
+          await ctx.answerCallbackQuery({ text: "Failed to save." });
+          return;
+        }
+        await ctx.answerCallbackQuery({ text: "Saved!" });
+        await ctx.editMessageText(
+          `✅ Saved: 💰 ${pending.amount.toFixed(2)} PLN — ${pending.source_label || "Income"}`
+        );
+        return;
+      }
 
-      if (error) {
+      // Expense path
+      // Ensure subcategory exists
+      let subcategoryId: string | null = null;
+      if (pending.subcategory) {
+        const userProfile = await findUserByTelegramId(ctx.from!.id);
+        subcategoryId = await ensureSubcategory(
+          pending.subcategory,
+          pending.category,
+          pending.userId,
+          userProfile?.household_id ?? null
+        );
+      }
+
+      const { data: savedExpense, error } = await supabase
+        .from("expenses")
+        .insert({
+          account_id: pending.accountId,
+          amount: pending.amount,
+          currency: "PLN",
+          category: pending.category,
+          subcategory_id: subcategoryId,
+          merchant: pending.merchant,
+          note: pending.note,
+          source: pending.source,
+          transcript: pending.transcript,
+          telegram_message_id: ctx.callbackQuery.message?.message_id ?? null,
+          expense_date: pending.expense_date,
+          created_by: pending.userId,
+        })
+        .select("id")
+        .single();
+
+      pendingItems.delete(pendingId);
+
+      if (error || !savedExpense) {
         await ctx.answerCallbackQuery({ text: "Failed to save. Try again." });
         return;
       }
 
       await ctx.answerCallbackQuery({ text: "Saved!" });
-      await ctx.editMessageText(
-        `✅ Saved: ${pending.amount.toFixed(2)} PLN — ${CATEGORY_EMOJI[pending.category]} ${pending.category}${pending.merchant ? ` at ${pending.merchant}` : ""}`,
+
+      // Build confirmation message
+      const subcat = pending.subcategory ? ` > ${pending.subcategory}` : "";
+      let confirmMsg = `✅ Saved: ${pending.amount.toFixed(2)} PLN — ${CATEGORY_EMOJI[pending.category]} ${pending.category}${subcat}${pending.merchant ? ` at ${pending.merchant}` : ""}`;
+
+      // Generate roast if enabled
+      const userProfile = await findUserByTelegramId(ctx.from!.id);
+      if (userProfile?.roast_enabled) {
+        // Get category spending context
+        const now = new Date();
+        const startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+        const { data: catExpenses } = await supabase
+          .from("expenses")
+          .select("amount")
+          .eq("created_by", pending.userId)
+          .eq("category", pending.category)
+          .gte("expense_date", startDate);
+        const monthTotal = (catExpenses ?? []).reduce((s, e) => s + Number(e.amount), 0);
+
+        const roast = await generateRoast({
+          amount: pending.amount,
+          category: pending.category,
+          subcategory: pending.subcategory,
+          merchant: pending.merchant,
+          monthCategoryTotal: monthTotal,
+          avgCategory: monthTotal, // simplified for now
+        });
+        if (roast) {
+          confirmMsg += `\n"${roast}"`;
+        }
+      }
+
+      // Store undo info
+      const undoId = nanoid(8);
+      undoStore.set(undoId, {
+        expenseId: savedExpense.id,
+        createdAt: Date.now(),
+      });
+
+      const undoKeyboard = new InlineKeyboard().text(
+        "↩️ Undo (30s)",
+        `undo:${undoId}`
       );
+
+      await ctx.editMessageText(confirmMsg, { reply_markup: undoKeyboard });
       return;
     }
 
     if (action === "cancel") {
-      pendingExpenses.delete(pendingId);
+      pendingItems.delete(pendingId);
       await ctx.answerCallbackQuery({ text: "Cancelled" });
-      await ctx.editMessageText("❌ Expense cancelled.");
+      await ctx.editMessageText("❌ Cancelled.");
       return;
     }
 
     if (action === "edit") {
-      const pending = pendingExpenses.get(pendingId);
+      const pending = pendingItems.get(pendingId);
       if (!pending) {
-        return ctx.answerCallbackQuery({ text: "Expense expired." });
+        return ctx.answerCallbackQuery({ text: "Expired." });
       }
 
       await ctx.answerCallbackQuery();
@@ -230,9 +434,9 @@ export function registerHandlers(bot: Bot) {
     }
 
     if (action === "back") {
-      const pending = pendingExpenses.get(pendingId);
+      const pending = pendingItems.get(pendingId);
       if (!pending) {
-        return ctx.answerCallbackQuery({ text: "Expense expired." });
+        return ctx.answerCallbackQuery({ text: "Expired." });
       }
       await ctx.answerCallbackQuery();
       await ctx.editMessageText(formatConfirmation(pending), {
@@ -248,7 +452,7 @@ export function registerHandlers(bot: Bot) {
         const cat = CATEGORIES[i];
         keyboard.text(
           `${CATEGORY_EMOJI[cat]} ${cat}`,
-          `set_category:${pendingId}:${cat}`,
+          `set_category:${pendingId}:${cat}`
         );
         if (i % 3 === 2) keyboard.row();
       }
@@ -260,9 +464,9 @@ export function registerHandlers(bot: Bot) {
 
     if (action === "set_category") {
       const [, pid, category] = data.split(":");
-      const pending = pendingExpenses.get(pid);
-      if (!pending) {
-        return ctx.answerCallbackQuery({ text: "Expense expired." });
+      const pending = pendingItems.get(pid);
+      if (!pending || pending.type !== "expense") {
+        return ctx.answerCallbackQuery({ text: "Expired." });
       }
       pending.category = category as ExpenseCategory;
       await ctx.answerCallbackQuery({ text: `Category: ${category}` });
@@ -272,7 +476,7 @@ export function registerHandlers(bot: Bot) {
       return;
     }
 
-    // For edit_amount, edit_merchant, edit_note, edit_date — prompt text reply
+    // Field editing via text reply
     if (
       action === "edit_amount" ||
       action === "edit_merchant" ||
@@ -280,21 +484,15 @@ export function registerHandlers(bot: Bot) {
       action === "edit_date"
     ) {
       const field = action.replace("edit_", "");
-      const pending = pendingExpenses.get(pendingId);
+      const pending = pendingItems.get(pendingId);
       if (!pending) {
-        return ctx.answerCallbackQuery({ text: "Expense expired." });
+        return ctx.answerCallbackQuery({ text: "Expired." });
       }
-      // Store edit state
-      pendingExpenses.set(`editing_${ctx.from!.id}`, {
-        ...pending,
-        // Use note field to temporarily store the edit target
-      } as PendingExpense);
-      // Store which field is being edited
       editStates.set(ctx.from!.id, { pendingId, field });
 
       await ctx.answerCallbackQuery();
       await ctx.editMessageText(
-        `Type the new ${field}:${field === "amount" ? " (number)" : field === "date" ? " (YYYY-MM-DD)" : ""}`,
+        `Type the new ${field}:${field === "amount" ? " (number)" : field === "date" ? " (YYYY-MM-DD)" : ""}`
       );
       return;
     }
@@ -305,20 +503,20 @@ export function registerHandlers(bot: Bot) {
   // Handle text replies for field editing
   const editStates = new Map<number, { pendingId: string; field: string }>();
 
-  // Text message handler (expense parsing) — will be expanded in Phase 4
+  // Text message handler
   bot.on("message:text", async (ctx) => {
-    const userId = (ctx as Context & { userId?: string }).userId;
-    if (!userId) return;
+    const userProfile = (ctx as Context & { userProfile?: { id: string; household_id: string | null; roast_enabled: boolean } }).userProfile;
+    if (!userProfile) return;
+    const userId = userProfile.id;
 
     // Check if this is a reply to an edit prompt
     const editState = editStates.get(ctx.from.id);
     if (editState) {
-      const pending = pendingExpenses.get(editState.pendingId);
+      const pending = pendingItems.get(editState.pendingId);
       editStates.delete(ctx.from.id);
-      pendingExpenses.delete(`editing_${ctx.from.id}`);
 
       if (!pending) {
-        return ctx.reply("That expense has expired. Send a new one.");
+        return ctx.reply("That entry has expired. Send a new one.");
       }
 
       const { field, pendingId } = editState;
@@ -330,7 +528,7 @@ export function registerHandlers(bot: Bot) {
           return ctx.reply("Please enter a valid positive number.");
         }
         pending.amount = num;
-      } else if (field === "merchant") {
+      } else if (field === "merchant" && pending.type === "expense") {
         pending.merchant = value;
       } else if (field === "note") {
         pending.note = value;
@@ -338,7 +536,8 @@ export function registerHandlers(bot: Bot) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
           return ctx.reply("Please use YYYY-MM-DD format.");
         }
-        pending.expense_date = value;
+        if (pending.type === "expense") pending.expense_date = value;
+        else pending.income_date = value;
       }
 
       return ctx.reply(formatConfirmation(pending), {
@@ -346,125 +545,175 @@ export function registerHandlers(bot: Bot) {
       });
     }
 
-    // AI text expense parsing
-    const account = await getUserDefaultAccount(userId);
+    // AI text parsing
+    const account = await getUserPrimaryAccount(userId);
     if (!account) {
       return ctx.reply(
-        "No account found. Please set up your account on the web app first.",
+        "No account found. Please set up your account on the web app first."
       );
     }
 
-    console.log("[text] Input:", ctx.message.text);
-    const result = await parseTextExpense(ctx.message.text);
-    console.log("[text] Parse result:", JSON.stringify(result));
+    const subcategories = await getUserSubcategories(userId);
+    const result = await parseTextExpense(ctx.message.text, subcategories);
     if (isParseError(result)) {
       return ctx.reply(
-        'I couldn\'t parse that as an expense.\n\nTry something like:\n• "15 coffee"\n• "Groceries 120 at Biedronka"\n• "Uber 25"',
+        'I couldn\'t parse that.\n\nTry:\n• "15 coffee"\n• "Groceries 120 at Biedronka"\n• "Salary 8000"'
       );
     }
 
     const pendingId = nanoid(8);
     const today = new Date().toISOString().split("T")[0];
-    pendingExpenses.set(pendingId, {
-      amount: result.amount,
-      category: result.category,
-      merchant: result.merchant,
-      note: result.note,
-      expense_date: today,
-      source: "text",
-      transcript: ctx.message.text,
-      userId,
-      accountId: account.id,
-    });
 
-    return ctx.reply(formatConfirmation(pendingExpenses.get(pendingId)!), {
+    if (isParsedIncome(result)) {
+      pendingItems.set(pendingId, {
+        type: "income",
+        amount: result.amount,
+        source_label: result.source_label,
+        note: result.note,
+        income_date: today,
+        source: "text",
+        userId,
+        accountId: account.id,
+      });
+    } else {
+      // Merchant normalization
+      let merchant = result.merchant;
+      let originalMerchant: string | null = null;
+      if (merchant) {
+        const knownMerchants = await getKnownMerchants(userProfile.household_id);
+        const normalized = await normalizeMerchant(merchant, knownMerchants);
+        if (normalized.wasNormalized) {
+          originalMerchant = merchant;
+          merchant = normalized.canonical;
+          await storeMerchantAlias(
+            originalMerchant,
+            normalized.canonical,
+            userProfile.household_id
+          );
+        }
+      }
+
+      pendingItems.set(pendingId, {
+        type: "expense",
+        amount: result.amount,
+        category: result.category,
+        subcategory: result.subcategory,
+        merchant,
+        originalMerchant,
+        note: result.note,
+        expense_date: result.date || today,
+        source: "text",
+        transcript: ctx.message.text,
+        userId,
+        accountId: account.id,
+      });
+    }
+
+    return ctx.reply(formatConfirmation(pendingItems.get(pendingId)!), {
       reply_markup: confirmationKeyboard(pendingId),
     });
   });
 
   // Voice message handler
   bot.on("message:voice", async (ctx) => {
-    const userId = (ctx as Context & { userId?: string }).userId;
-    if (!userId) return;
+    const userProfile = (ctx as Context & { userProfile?: { id: string; household_id: string | null; roast_enabled: boolean } }).userProfile;
+    if (!userProfile) return;
+    const userId = userProfile.id;
 
-    const account = await getUserDefaultAccount(userId);
+    const account = await getUserPrimaryAccount(userId);
     if (!account) {
-      return ctx.reply(
-        "No account found. Please set up your account on the web app first.",
-      );
+      return ctx.reply("No account found. Set up on the web app first.");
     }
 
     await ctx.reply("🎙 Transcribing...");
 
     try {
-      // Download voice file
       const file = await ctx.getFile();
       const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
       const response = await fetch(fileUrl);
       const buffer = Buffer.from(await response.arrayBuffer());
 
-      // Transcribe via Groq
       const { transcribe } = await import("@/lib/ai/groq");
       const transcript = await transcribe(buffer);
 
       if (!transcript) {
-        return ctx.reply(
-          "I couldn't understand the audio. Try again or type your expense instead.",
-        );
+        return ctx.reply("Couldn't understand the audio. Try typing instead.");
       }
 
-      console.log("[voice] Transcript:", transcript);
-
-      // Parse via Gemini
-      const result = await parseVoiceExpense(transcript);
-      console.log("[voice] Parse result:", JSON.stringify(result));
+      const subcategories = await getUserSubcategories(userId);
+      const result = await parseVoiceExpense(transcript, subcategories);
       if (isParseError(result)) {
         return ctx.reply(
-          `I heard: "${transcript}"\n\nBut I couldn't identify an expense. Try something like "Spent 40 zloty on gas".`,
+          `I heard: "${transcript}"\n\nBut couldn't identify an expense or income.`
         );
       }
 
       const pendingId = nanoid(8);
       const today = new Date().toISOString().split("T")[0];
-      pendingExpenses.set(pendingId, {
-        amount: result.amount,
-        category: result.category,
-        merchant: result.merchant,
-        note: result.note,
-        expense_date: result.date || today,
-        source: "voice",
-        transcript,
-        userId,
-        accountId: account.id,
-      });
 
-      return ctx.reply(formatConfirmation(pendingExpenses.get(pendingId)!), {
+      if (isParsedIncome(result)) {
+        pendingItems.set(pendingId, {
+          type: "income",
+          amount: result.amount,
+          source_label: result.source_label,
+          note: result.note,
+          income_date: today,
+          source: "voice",
+          userId,
+          accountId: account.id,
+        });
+      } else {
+        let merchant = result.merchant;
+        let originalMerchant: string | null = null;
+        if (merchant) {
+          const knownMerchants = await getKnownMerchants(userProfile.household_id);
+          const normalized = await normalizeMerchant(merchant, knownMerchants);
+          if (normalized.wasNormalized) {
+            originalMerchant = merchant;
+            merchant = normalized.canonical;
+            await storeMerchantAlias(originalMerchant, normalized.canonical, userProfile.household_id);
+          }
+        }
+
+        pendingItems.set(pendingId, {
+          type: "expense",
+          amount: result.amount,
+          category: result.category,
+          subcategory: result.subcategory,
+          merchant,
+          originalMerchant,
+          note: result.note,
+          expense_date: result.date || today,
+          source: "voice",
+          transcript,
+          userId,
+          accountId: account.id,
+        });
+      }
+
+      return ctx.reply(formatConfirmation(pendingItems.get(pendingId)!), {
         reply_markup: confirmationKeyboard(pendingId),
       });
     } catch (error) {
       console.error("Voice processing error:", error);
-      return ctx.reply(
-        "Something went wrong processing your voice message. Try typing your expense instead.",
-      );
+      return ctx.reply("Something went wrong. Try typing instead.");
     }
   });
 
   // Photo message handler (receipt)
   bot.on("message:photo", async (ctx) => {
-    const userId = (ctx as Context & { userId?: string }).userId;
-    if (!userId) return;
+    const userProfile = (ctx as Context & { userProfile?: { id: string; household_id: string | null; roast_enabled: boolean } }).userProfile;
+    if (!userProfile) return;
+    const userId = userProfile.id;
 
-    const account = await getUserDefaultAccount(userId);
+    const account = await getUserPrimaryAccount(userId);
     if (!account) {
-      return ctx.reply(
-        "No account found. Please set up your account on the web app first.",
-      );
+      return ctx.reply("No account found. Set up on the web app first.");
     }
 
     await ctx.reply("📸 Reading receipt...");
 
     try {
-      // Get largest photo
       const photos = ctx.message.photo;
       const photo = photos[photos.length - 1];
       const file = await ctx.api.getFile(photo.file_id);
@@ -474,51 +723,45 @@ export function registerHandlers(bot: Bot) {
       const base64 = buffer.toString("base64");
 
       const result = await parseReceiptImage(base64, "image/jpeg");
-      if (isParseError(result)) {
-        return ctx.reply(
-          "I couldn't read this as a receipt. Make sure the image is clear, or type the expense instead.",
-        );
+      if (isParseError(result) || isParsedIncome(result)) {
+        return ctx.reply("Couldn't read this as a receipt. Try typing instead.");
       }
 
       const pendingId = nanoid(8);
-      const today = new Date().toISOString().split("T")[0];
-      pendingExpenses.set(pendingId, {
+      pendingItems.set(pendingId, {
+        type: "expense",
         amount: result.amount,
         category: result.category,
+        subcategory: result.subcategory,
         merchant: result.merchant,
+        originalMerchant: null,
         note: result.note,
-        expense_date: result.date || today,
+        expense_date: result.date || new Date().toISOString().split("T")[0],
         source: "receipt",
         transcript: `Amount: ${result.amount}, Merchant: ${result.merchant || "unknown"}`,
         userId,
         accountId: account.id,
       });
 
-      return ctx.reply(formatConfirmation(pendingExpenses.get(pendingId)!), {
+      return ctx.reply(formatConfirmation(pendingItems.get(pendingId)!), {
         reply_markup: confirmationKeyboard(pendingId),
       });
     } catch (error) {
       console.error("Receipt processing error:", error);
-      return ctx.reply(
-        "Something went wrong reading the receipt. Try typing the expense instead.",
-      );
+      return ctx.reply("Something went wrong. Try typing instead.");
     }
   });
 
-  // Document handler — reject non-image files
   bot.on("message:document", async (ctx) => {
-    return ctx.reply(
-      "Only photo images are supported for receipt parsing. Please send a photo instead.",
-    );
+    return ctx.reply("Only photo images are supported for receipts.");
   });
 }
 
-// Export for use in handlers
 export {
-  pendingExpenses,
+  pendingItems,
   formatConfirmation,
   confirmationKeyboard,
   findUserByTelegramId,
-  getUserDefaultAccount,
+  getUserPrimaryAccount,
 };
-export type { PendingExpense };
+export type { PendingExpense, PendingIncome, PendingItem };

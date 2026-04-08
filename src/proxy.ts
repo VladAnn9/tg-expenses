@@ -28,9 +28,13 @@ export async function proxy(req: NextRequest) {
     },
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data?.user ?? null;
+  } catch (e) {
+    console.warn("[proxy] auth.getUser() failed, treating as unauthenticated:", (e as Error).message);
+  }
 
   const path = req.nextUrl.pathname;
   const isProtected = protectedRoutes.some(
@@ -41,7 +45,10 @@ export async function proxy(req: NextRequest) {
   );
 
   if (isProtected && !user) {
-    return NextResponse.redirect(new URL("/login", req.nextUrl));
+    const loginUrl = new URL("/login", req.nextUrl);
+    // Preserve the full path + query so we can redirect back after login
+    loginUrl.searchParams.set("redirectTo", path + req.nextUrl.search);
+    return NextResponse.redirect(loginUrl);
   }
 
   if (isPublic && user) {

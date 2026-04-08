@@ -1,0 +1,207 @@
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { SaveIcon, ClearIcon, TrashIcon } from "@/components/ui/icons";
+import IncomeForm from "./income-form";
+
+interface IncomeCardProps {
+  income: {
+    id: string;
+    amount: number;
+    source_label: string | null;
+    note: string | null;
+    income_date: string;
+  };
+  isEditing: boolean;
+  onEditStart: () => void;
+  onEditEnd: () => void;
+  onUpdate: () => void;
+  onDelete?: () => void;
+}
+
+export default function IncomeCard({
+  income,
+  isEditing,
+  onEditStart,
+  onEditEnd,
+  onUpdate,
+  onDelete,
+}: IncomeCardProps) {
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteValue, setNoteValue] = useState(income.note ?? "");
+  const [savingNote, setSavingNote] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!isEditing) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onEditEnd();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [isEditing, onEditEnd]);
+
+  // Close on click outside
+  useEffect(() => {
+    if (!isEditing) return;
+    const handleClick = (e: MouseEvent) => {
+      if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
+        onEditEnd();
+      }
+    };
+    const timer = setTimeout(() => {
+      document.addEventListener("mousedown", handleClick);
+    }, 10);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", handleClick);
+    };
+  }, [isEditing, onEditEnd]);
+
+  useEffect(() => {
+    setNoteValue(income.note ?? "");
+  }, [income.note]);
+
+  const saveNoteValue = async (value: string) => {
+    setSavingNote(true);
+    try {
+      await fetch(`/api/income/${income.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: value || null }),
+      });
+      setNoteValue(value);
+      setEditingNote(false);
+      onUpdate();
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  return (
+    <motion.div ref={cardRef} layout transition={{ layout: { duration: 0.25, ease: [0.25, 0.1, 0.25, 1] } }}>
+      <AnimatePresence mode="wait" initial={false}>
+        {isEditing ? (
+          <motion.div
+            key="edit"
+            initial={{ opacity: 0, scale: 0.97, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.97, y: -4 }}
+            transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+            className="rounded-2xl border border-sage/30 bg-cream p-4 shadow-sm"
+          >
+            <IncomeForm
+              income={income}
+              onSave={() => {
+                onEditEnd();
+                onUpdate();
+              }}
+              onCancel={onEditEnd}
+            />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="view"
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.97 }}
+            transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+            className="rounded-xl border border-sage/20 bg-sage/5 p-4 cursor-pointer"
+            onClick={onEditStart}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-xl flex-shrink-0">💰</span>
+                <div className="min-w-0">
+                  <p className="font-medium text-sage truncate">
+                    {income.source_label || "Income"}
+                  </p>
+                  <p className="text-xs text-ink-light">
+                    {income.income_date}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
+                <p className="font-number text-lg font-light tabular-nums text-sage">
+                  +{Number(income.amount).toFixed(2)}
+                  <span className="ml-1 text-xs text-ink-light">PLN</span>
+                </p>
+                {onDelete && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                    className="rounded-lg p-1.5 text-ink-light/40 transition-colors hover:bg-terracotta/10 hover:text-terracotta"
+                    title="Delete"
+                  >
+                    <TrashIcon className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Inline note */}
+            <div className="mt-2 border-t border-sage/10 pt-2">
+              {editingNote ? (
+                <div
+                  className="flex items-center gap-1.5"
+                  onClick={(e) => e.stopPropagation()}
+                  onBlur={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      setNoteValue(income.note ?? "");
+                      setEditingNote(false);
+                    }
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={noteValue}
+                    onChange={(e) => setNoteValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveNoteValue(noteValue);
+                      if (e.key === "Escape") {
+                        setNoteValue(income.note ?? "");
+                        setEditingNote(false);
+                      }
+                    }}
+                    className="flex-1 min-w-0 rounded-lg border border-sand bg-cream/50 px-3 py-1.5 text-sm focus:border-sage focus:outline-none"
+                    placeholder="Add a note..."
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => saveNoteValue(noteValue)}
+                    disabled={savingNote}
+                    className="flex-shrink-0 rounded-lg p-1.5 text-sage transition-colors hover:bg-sage/10 active:scale-90 disabled:opacity-40"
+                    title="Save note"
+                  >
+                    <SaveIcon className="h-5 w-5" />
+                  </button>
+                  {income.note && (
+                    <button
+                      onClick={() => saveNoteValue("")}
+                      disabled={savingNote}
+                      className="flex-shrink-0 rounded-lg p-1.5 text-terracotta transition-colors hover:bg-terracotta/10 active:scale-90 disabled:opacity-40"
+                      title="Clear note"
+                    >
+                      <ClearIcon className="h-5 w-5" />
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingNote(true);
+                  }}
+                  className="text-sm text-ink-light hover:text-ink transition-colors"
+                >
+                  {income.note || "Add note..."}
+                </button>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}

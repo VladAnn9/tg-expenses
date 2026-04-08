@@ -2,19 +2,23 @@ import type { ExpenseCategory } from "@/types/database";
 
 export const CATEGORIES: ExpenseCategory[] = [
   "Food",
+  "Dining",
+  "Housing",
+  "Bills",
   "Transport",
   "Shopping",
-  "Bills",
   "Entertainment",
   "Health",
   "Other",
 ];
 
 export const CATEGORY_EMOJI: Record<ExpenseCategory, string> = {
-  Food: "🍕",
-  Transport: "🚗",
-  Shopping: "🛍",
+  Food: "🛒",
+  Dining: "🍽️",
+  Housing: "🏠",
   Bills: "📄",
+  Transport: "🚗",
+  Shopping: "🛍️",
   Entertainment: "🎬",
   Health: "💊",
   Other: "📦",

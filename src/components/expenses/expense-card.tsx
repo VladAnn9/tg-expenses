@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { CATEGORY_EMOJI } from "@/lib/utils/categories";
+import { SaveIcon, ClearIcon, TrashIcon } from "@/components/ui/icons";
 import type { ExpenseCategory } from "@/types/database";
 import ExpenseForm from "./expense-form";
 
@@ -15,29 +16,16 @@ interface ExpenseCardProps {
     note: string | null;
     expense_date: string;
     source: string;
+    created_by?: string;
+    account_name?: string;
   };
   isEditing: boolean;
   onEditStart: () => void;
   onEditEnd: () => void;
   onUpdate: () => void;
-}
-
-function SaveIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-      <path d="M8 12.5l2.5 2.5 5-5" stroke="currentColor" strokeWidth="2.5" />
-    </svg>
-  );
-}
-
-function ClearIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} strokeLinecap="round">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.3" />
-      <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" strokeWidth="2.5" />
-    </svg>
-  );
+  onDelete?: () => void;
+  loggedByName?: string;
+  showAccount?: boolean;
 }
 
 export default function ExpenseCard({
@@ -46,6 +34,9 @@ export default function ExpenseCard({
   onEditStart,
   onEditEnd,
   onUpdate,
+  onDelete,
+  loggedByName,
+  showAccount,
 }: ExpenseCardProps) {
   const [editingNote, setEditingNote] = useState(false);
   const [noteValue, setNoteValue] = useState(expense.note ?? "");
@@ -143,18 +134,34 @@ export default function ExpenseCard({
                   </p>
                   <p className="text-xs text-ink-light">
                     {expense.expense_date}
-                    {expense.source !== "web" && (
+                    {loggedByName && (
+                      <span className="ml-2 rounded bg-sage/10 px-1.5 py-0.5 text-[10px] text-sage">
+                        {loggedByName}
+                      </span>
+                    )}
+                    {showAccount && expense.account_name && (
                       <span className="ml-2 rounded bg-mist px-1.5 py-0.5 text-[10px]">
-                        {expense.source}
+                        {expense.account_name}
                       </span>
                     )}
                   </p>
                 </div>
               </div>
-              <p className="font-display text-lg font-light flex-shrink-0 ml-3">
-                {Number(expense.amount).toFixed(2)}
-                <span className="ml-1 text-xs text-ink-light">PLN</span>
-              </p>
+              <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
+                <p className="font-number text-lg font-light tabular-nums">
+                  {Number(expense.amount).toFixed(2)}
+                  <span className="ml-1 text-xs text-ink-light">PLN</span>
+                </p>
+                {onDelete && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                    className="rounded-lg p-1.5 text-ink-light/40 transition-colors hover:bg-terracotta/10 hover:text-terracotta"
+                    title="Delete"
+                  >
+                    <TrashIcon className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Inline note */}
@@ -163,6 +170,12 @@ export default function ExpenseCard({
                 <div
                   className="flex items-center gap-1.5"
                   onClick={(e) => e.stopPropagation()}
+                  onBlur={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      setNoteValue(expense.note ?? "");
+                      setEditingNote(false);
+                    }
+                  }}
                 >
                   <input
                     type="text"
