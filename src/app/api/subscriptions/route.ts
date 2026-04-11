@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdMemberIds } from "@/lib/supabase/household";
 
 export async function GET() {
   const supabase = await createClient();
@@ -13,10 +14,11 @@ export async function GET() {
   }
 
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
   const { data: subscriptions, error } = await admin
     .from("subscriptions")
     .select("*")
-    .eq("user_id", user.id)
+    .in("user_id", memberIds)
     .neq("status", "dismissed")
     .order("next_expected", { ascending: true });
 

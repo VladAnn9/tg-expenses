@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdMemberIds } from "@/lib/supabase/household";
 
 export async function GET() {
   const supabase = await createClient();
@@ -13,18 +14,19 @@ export async function GET() {
   }
 
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
 
   // Get distinct months from expenses
   const { data: expenseMonths } = await admin
     .from("expenses")
     .select("expense_date")
-    .eq("created_by", user.id);
+    .in("created_by", memberIds);
 
   // Get distinct months from income
   const { data: incomeMonths } = await admin
     .from("income_entries")
     .select("income_date")
-    .eq("created_by", user.id);
+    .in("created_by", memberIds);
 
   const monthSet = new Set<string>();
 

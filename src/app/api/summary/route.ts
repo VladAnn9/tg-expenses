@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdMemberIds } from "@/lib/supabase/household";
 import type { ExpenseCategory } from "@/types/database";
 import { CATEGORIES } from "@/lib/utils/categories";
 
@@ -15,6 +16,7 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
   const { searchParams } = req.nextUrl;
   const now = new Date();
   const month =
@@ -33,7 +35,7 @@ export async function GET(req: NextRequest) {
   let expenseQuery = admin
     .from("expenses")
     .select("amount, category, expense_date, subcategory_id")
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .gte("expense_date", startDate)
     .lt("expense_date", endDate);
 
@@ -94,7 +96,7 @@ export async function GET(req: NextRequest) {
   const { data: incomeData } = await admin
     .from("income_entries")
     .select("amount")
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .gte("income_date", startDate)
     .lt("income_date", endDate);
 
@@ -111,7 +113,7 @@ export async function GET(req: NextRequest) {
   const { data: prevExpenses } = await admin
     .from("expenses")
     .select("amount")
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .gte("expense_date", prevStartDate)
     .lt("expense_date", startDate);
 
@@ -136,7 +138,7 @@ export async function GET(req: NextRequest) {
   const { data: tempoExpenses } = await admin
     .from("expenses")
     .select("amount, expense_date, category, subcategory_id")
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .gte("expense_date", tempoStart)
     .lte("expense_date", now.toISOString().split("T")[0]);
 
@@ -185,22 +187,20 @@ export async function GET(req: NextRequest) {
     categories: t.categories.sort((a, b) => b.amount - a.amount),
   }));
 
-  // Balance at start of month (carry-over from previous months)
-  const { data: carryOverVal } = await admin.rpc("balance_at", {
-    p_user_id: user.id,
-    p_date: startDate,
-  });
-  const carryOver = Number(carryOverVal) || 0;
+  // Balance at start of month (carry-over from previous months) — sum across household
+  const balanceResults = await Promise.all(
+    memberIds.map((id) => admin.rpc("balance_at", { p_user_id: id, p_date: startDate }))
+  );
+  const carryOver = balanceResults.reduce((sum, r) => sum + (Number(r.data) || 0), 0);
 
   // Running balance = carry-over + this month's income - this month's expenses
   const runningBalance = carryOver + incomeTotal - total;
 
-  // Check if user has any income ever (for safe-to-spend visibility)
-  const { data: totalIncomeCheck } = await admin.rpc("sum_income", {
-    p_user_id: user.id,
-    p_before: endDate,
-  });
-  const hasAnyIncome = (Number(totalIncomeCheck) || 0) > 0;
+  // Check if household has any income ever (for safe-to-spend visibility)
+  const incomeCheckResults = await Promise.all(
+    memberIds.map((id) => admin.rpc("sum_income", { p_user_id: id, p_before: endDate }))
+  );
+  const hasAnyIncome = incomeCheckResults.some((r) => (Number(r.data) || 0) > 0);
 
   // Safe to Spend (null if no income ever)
   let safeToSpend: number | null = null;
@@ -208,7 +208,7 @@ export async function GET(req: NextRequest) {
     const { data: confirmedSubs } = await admin
       .from("subscriptions")
       .select("amount")
-      .eq("user_id", user.id)
+      .in("user_id", memberIds)
       .eq("status", "confirmed");
 
     const monthlySubsTotal = (confirmedSubs ?? []).reduce(
@@ -222,7 +222,7 @@ export async function GET(req: NextRequest) {
   const { data: recent } = await admin
     .from("expenses")
     .select("id, amount, category, merchant, expense_date, note, created_by")
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .order("expense_date", { ascending: false })
     .limit(10);
 

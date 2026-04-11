@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdMemberIds } from "@/lib/supabase/household";
 import { GoogleGenAI } from "@google/genai";
 import { INSIGHT_PROMPT } from "@/lib/ai/prompts";
 import { CATEGORIES } from "@/lib/utils/categories";
@@ -21,6 +22,7 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
   const now = new Date();
   const { searchParams } = req.nextUrl;
   const month =
@@ -56,14 +58,14 @@ export async function GET(req: NextRequest) {
   const { data: currentExpenses } = await admin
     .from("expenses")
     .select("amount, category")
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .gte("expense_date", startDate)
     .lt("expense_date", endDate);
 
   const { data: prevExpenses } = await admin
     .from("expenses")
     .select("amount, category")
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .gte("expense_date", prevStartDate)
     .lt("expense_date", startDate);
 

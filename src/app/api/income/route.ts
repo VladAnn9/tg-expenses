@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdMemberIds } from "@/lib/supabase/household";
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
@@ -13,6 +14,7 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
 
   const { searchParams } = req.nextUrl;
   const now = new Date();
@@ -32,7 +34,7 @@ export async function GET(req: NextRequest) {
   const { data, count } = await admin
     .from("income_entries")
     .select("*", { count: "exact" })
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .gte("income_date", startDate)
     .lt("income_date", endDate)
     .order("income_date", { ascending: false })
@@ -42,7 +44,7 @@ export async function GET(req: NextRequest) {
   const { data: totalData } = await admin
     .from("income_entries")
     .select("amount")
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .gte("income_date", startDate)
     .lt("income_date", endDate);
 

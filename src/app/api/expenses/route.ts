@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdMemberIds } from "@/lib/supabase/household";
 import { isValidCategory } from "@/lib/utils/categories";
 
 export async function GET(req: NextRequest) {
@@ -11,6 +13,9 @@ export async function GET(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
+
+  const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
 
   const { searchParams } = req.nextUrl;
   const now = new Date();
@@ -30,10 +35,10 @@ export async function GET(req: NextRequest) {
       ? `${year + 1}-01-01`
       : `${year}-${String(monthNum + 1).padStart(2, "0")}-01`;
 
-  let query = supabase
+  let query = admin
     .from("expenses")
     .select("*", { count: "exact" })
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .gte("expense_date", startDate)
     .lt("expense_date", endDate)
     .order("expense_date", { ascending: false })
@@ -54,10 +59,10 @@ export async function GET(req: NextRequest) {
   const { data, count } = await query;
 
   // Month total
-  const { data: totalData } = await supabase
+  const { data: totalData } = await admin
     .from("expenses")
     .select("amount")
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .gte("expense_date", startDate)
     .lt("expense_date", endDate);
 

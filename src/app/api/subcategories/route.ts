@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdMemberIds } from "@/lib/supabase/household";
 import { isValidCategory } from "@/lib/utils/categories";
 
 export async function GET(req: NextRequest) {
@@ -14,12 +15,13 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
   const category = req.nextUrl.searchParams.get("category");
 
   let query = admin
     .from("subcategories")
     .select("id, name, parent_category, created_at")
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .order("name");
 
   if (category && isValidCategory(category)) {
