@@ -289,7 +289,7 @@ export default function SettingsPage() {
                         );
                         setNewSubName("");
                       }}
-                      className="rounded-lg px-2 py-1 text-xs text-ink-light transition-colors hover:bg-mist/50 hover:text-ink"
+                      className="rounded-lg px-3 py-2 text-sm text-ink-light transition-colors hover:bg-mist/50 hover:text-ink"
                     >
                       {addingCategory === cat ? "Cancel" : "+ Add"}
                     </button>
@@ -306,13 +306,13 @@ export default function SettingsPage() {
                           if (e.key === "Enter") handleAddSubcategory(cat);
                         }}
                         placeholder="Subcategory name"
-                        className="flex-1 rounded-lg border border-sand/50 bg-stone px-3 py-1.5 text-sm text-ink placeholder:text-ink-light/50 focus:border-sage focus:outline-none"
+                        className="flex-1 rounded-lg border border-sand/50 bg-stone px-3 py-2.5 text-base text-ink placeholder:text-ink-light/50 focus:border-sage focus:outline-none"
                         autoFocus
                       />
                       <button
                         onClick={() => handleAddSubcategory(cat)}
                         disabled={addingLoading || !newSubName.trim()}
-                        className="rounded-lg bg-ink px-3 py-1.5 text-xs text-cream transition-colors hover:bg-ink/90 disabled:opacity-50"
+                        className="rounded-lg bg-ink px-4 py-2.5 text-sm text-cream transition-colors hover:bg-ink/90 disabled:opacity-50"
                       >
                         {addingLoading ? "..." : "Save"}
                       </button>
@@ -411,7 +411,7 @@ export default function SettingsPage() {
                               <div className="relative">
                                 <button
                                   onClick={() => setOpenMenuId(openMenuId === sub.id ? null : sub.id)}
-                                  className="rounded-lg p-1.5 text-ink-light transition-colors hover:bg-mist/50 hover:text-ink"
+                                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-ink-light transition-colors hover:bg-mist/50 hover:text-ink"
                                 >
                                   <MoreIcon className="h-4 w-4" />
                                 </button>
@@ -429,7 +429,7 @@ export default function SettingsPage() {
                                           setMergingId(null);
                                           setOpenMenuId(null);
                                         }}
-                                        className="flex w-full px-3 py-2 text-left text-xs text-ink transition-colors hover:bg-mist/50"
+                                        className="flex w-full px-4 py-3 text-left text-sm text-ink transition-colors hover:bg-mist/50"
                                       >
                                         Rename
                                       </button>
@@ -441,7 +441,7 @@ export default function SettingsPage() {
                                             setEditingId(null);
                                             setOpenMenuId(null);
                                           }}
-                                          className="flex w-full px-3 py-2 text-left text-xs text-ink transition-colors hover:bg-mist/50"
+                                          className="flex w-full px-4 py-3 text-left text-sm text-ink transition-colors hover:bg-mist/50"
                                         >
                                           Merge
                                         </button>
@@ -452,7 +452,7 @@ export default function SettingsPage() {
                                             handleDelete(sub.id, sub.name);
                                             setOpenMenuId(null);
                                           }}
-                                          className="flex w-full px-3 py-2 text-left text-xs text-terracotta transition-colors hover:bg-terracotta/5"
+                                          className="flex w-full px-4 py-3 text-left text-sm text-terracotta transition-colors hover:bg-terracotta/5"
                                         >
                                           Delete
                                         </button>

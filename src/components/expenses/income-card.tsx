@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { SaveIcon, ClearIcon, TrashIcon } from "@/components/ui/icons";
+import { useIsMobile } from "@/lib/hooks/use-is-mobile";
+import SwipeableCard from "@/components/ui/swipeable-card";
 import IncomeForm from "./income-form";
 
 interface IncomeCardProps {
@@ -32,6 +34,7 @@ export default function IncomeCard({
   const [noteValue, setNoteValue] = useState(income.note ?? "");
   const [savingNote, setSavingNote] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
 
   // Close on Escape
   useEffect(() => {
@@ -108,97 +111,104 @@ export default function IncomeCard({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.97 }}
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
-            className="rounded-xl border border-sage/20 bg-sage/5 p-4 cursor-pointer"
-            onClick={onEditStart}
           >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3 min-w-0">
-                <span className="text-xl flex-shrink-0">💰</span>
-                <div className="min-w-0">
-                  <p className="font-medium text-sage truncate">
-                    {income.source_label || "Income"}
+            <SwipeableCard
+              onDelete={onDelete}
+              onClick={onEditStart}
+              className="border border-sage/20 bg-stone p-4"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-xl flex-shrink-0">💰</span>
+                  <div className="min-w-0">
+                    <p className="font-medium text-sage truncate">
+                      {income.source_label || "Income"}
+                    </p>
+                    <p className="text-xs text-ink-light">
+                      {income.income_date}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
+                  <p className="font-number text-lg font-light tabular-nums text-sage">
+                    +{Number(income.amount).toFixed(2)}
+                    <span className="ml-1 text-xs text-ink-light">PLN</span>
                   </p>
-                  <p className="text-xs text-ink-light">
-                    {income.income_date}
-                  </p>
+                  {onDelete && !isMobile && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-ink-light/40 transition-colors hover:bg-terracotta/10 hover:text-terracotta"
+                      title="Delete"
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
-                <p className="font-number text-lg font-light tabular-nums text-sage">
-                  +{Number(income.amount).toFixed(2)}
-                  <span className="ml-1 text-xs text-ink-light">PLN</span>
-                </p>
-                {onDelete && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                    className="rounded-lg p-1.5 text-ink-light/40 transition-colors hover:bg-terracotta/10 hover:text-terracotta"
-                    title="Delete"
-                  >
-                    <TrashIcon className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
 
-            {/* Inline note */}
-            <div className="mt-2 border-t border-sage/10 pt-2">
-              {editingNote ? (
-                <div
-                  className="flex items-center gap-1.5"
-                  onClick={(e) => e.stopPropagation()}
-                  onBlur={(e) => {
-                    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                      setNoteValue(income.note ?? "");
-                      setEditingNote(false);
-                    }
-                  }}
-                >
-                  <input
-                    type="text"
-                    value={noteValue}
-                    onChange={(e) => setNoteValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") saveNoteValue(noteValue);
-                      if (e.key === "Escape") {
+              {/* Inline note */}
+              <div
+                className="mt-2 border-t border-sage/10 pt-2"
+                onPointerDown={(e) => e.stopPropagation()}
+              >
+                {editingNote ? (
+                  <div
+                    className="flex items-center gap-1.5"
+                    onClick={(e) => e.stopPropagation()}
+                    onBlur={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node)) {
                         setNoteValue(income.note ?? "");
                         setEditingNote(false);
                       }
                     }}
-                    className="flex-1 min-w-0 rounded-lg border border-sand bg-cream/50 px-3 py-1.5 text-sm focus:border-sage focus:outline-none"
-                    placeholder="Add a note..."
-                    autoFocus
-                  />
-                  <button
-                    onClick={() => saveNoteValue(noteValue)}
-                    disabled={savingNote}
-                    className="flex-shrink-0 rounded-lg p-1.5 text-sage transition-colors hover:bg-sage/10 active:scale-90 disabled:opacity-40"
-                    title="Save note"
                   >
-                    <SaveIcon className="h-5 w-5" />
-                  </button>
-                  {income.note && (
+                    <input
+                      type="text"
+                      value={noteValue}
+                      onChange={(e) => setNoteValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveNoteValue(noteValue);
+                        if (e.key === "Escape") {
+                          setNoteValue(income.note ?? "");
+                          setEditingNote(false);
+                        }
+                      }}
+                      className="flex-1 min-w-0 rounded-lg border border-sand bg-cream/50 px-3 py-2 text-base focus:border-sage focus:outline-none"
+                      placeholder="Add a note..."
+                      autoFocus
+                    />
                     <button
-                      onClick={() => saveNoteValue("")}
+                      onClick={() => saveNoteValue(noteValue)}
                       disabled={savingNote}
-                      className="flex-shrink-0 rounded-lg p-1.5 text-terracotta transition-colors hover:bg-terracotta/10 active:scale-90 disabled:opacity-40"
-                      title="Clear note"
+                      className="flex-shrink-0 rounded-lg p-2.5 text-sage transition-colors hover:bg-sage/10 active:scale-90 disabled:opacity-40"
+                      title="Save note"
                     >
-                      <ClearIcon className="h-5 w-5" />
+                      <SaveIcon className="h-5 w-5" />
                     </button>
-                  )}
-                </div>
-              ) : (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingNote(true);
-                  }}
-                  className="text-sm text-ink-light hover:text-ink transition-colors"
-                >
-                  {income.note || "Add note..."}
-                </button>
-              )}
-            </div>
+                    {income.note && (
+                      <button
+                        onClick={() => saveNoteValue("")}
+                        disabled={savingNote}
+                        className="flex-shrink-0 rounded-lg p-2.5 text-terracotta transition-colors hover:bg-terracotta/10 active:scale-90 disabled:opacity-40"
+                        title="Clear note"
+                      >
+                        <ClearIcon className="h-5 w-5" />
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingNote(true);
+                    }}
+                    className="py-1 text-sm text-ink-light hover:text-ink transition-colors"
+                  >
+                    {income.note || "Add note..."}
+                  </button>
+                )}
+              </div>
+            </SwipeableCard>
           </motion.div>
         )}
       </AnimatePresence>

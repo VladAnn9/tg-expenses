@@ -105,8 +105,8 @@ export default function CategoryChart({ data }: CategoryChartProps) {
                     ? setExpandedCategory(isExpanded ? null : item.category)
                     : undefined
                 }
-                className={`flex w-full items-center justify-between rounded-lg px-1 py-1 transition-colors ${
-                  hasSubs ? "hover:bg-mist/30 cursor-pointer" : "cursor-default"
+                className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 transition-colors ${
+                  hasSubs ? "hover:bg-mist/30 active:bg-mist/50 cursor-pointer" : "cursor-default"
                 }`}
               >
                 <div className="flex items-center gap-2">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { motion } from "motion/react";
 import { CATEGORIES, CATEGORY_EMOJI } from "@/lib/utils/categories";
 import type { ExpenseCategory, AccountType } from "@/types/database";
 
@@ -61,7 +62,7 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
           setAccountId(primary?.id ?? accts[0].id);
         }
       });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch subcategories when category changes
   useEffect(() => {
@@ -78,7 +79,7 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
           if (!stillValid) setSubcategoryId("");
         }
       });
-  }, [category]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [category]);
 
   const handleCreateSubcategory = async () => {
     const name = newSubcategoryName.trim();
@@ -158,8 +159,9 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
           min="0.01"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          className="mt-1 w-full rounded-lg border border-sand bg-cream/50 px-4 py-3 text-ink focus:border-sage focus:outline-none"
+          className="mt-1 w-full rounded-lg border border-sand bg-cream/50 px-4 py-3 text-base text-ink focus:border-sage focus:outline-none"
           placeholder="0.00"
+          inputMode="decimal"
           required
         />
       </div>
@@ -183,21 +185,22 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
 
       <div>
         <label className="block text-sm text-ink-light">Category</label>
-        <div className="mt-1 flex flex-wrap gap-2">
+        <div className="mt-2 grid grid-cols-5 gap-1.5">
           {CATEGORIES.map((cat) => (
-            <button
+            <motion.button
               key={cat}
               type="button"
+              whileTap={{ scale: 0.95 }}
               onClick={() => setCategory(cat)}
-              className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs whitespace-nowrap transition-colors ${
+              className={`flex flex-col items-center gap-0.5 rounded-xl border px-1 py-2.5 transition-all ${
                 category === cat
-                  ? "border-sage bg-sage/10 text-ink"
-                  : "border-sand/50 bg-cream/30 text-ink-light hover:border-sand"
+                  ? "border-sage bg-sage/10 text-ink shadow-sm"
+                  : "border-sand/30 bg-cream/30 text-ink-light"
               }`}
             >
-              <span>{CATEGORY_EMOJI[cat]}</span>
-              <span>{cat}</span>
-            </button>
+              <span className="text-lg">{CATEGORY_EMOJI[cat]}</span>
+              <span className="w-full truncate text-center text-[10px] leading-tight">{cat}</span>
+            </motion.button>
           ))}
         </div>
       </div>
@@ -208,7 +211,7 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
           <button
             type="button"
             onClick={() => setSubcategoryId("")}
-            className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+            className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
               !subcategoryId
                 ? "border-sage bg-sage/10 text-ink"
                 : "border-sand/50 bg-cream/30 text-ink-light hover:border-sand"
@@ -221,7 +224,7 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
               key={sub.id}
               type="button"
               onClick={() => setSubcategoryId(sub.id)}
-              className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+              className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                 subcategoryId === sub.id
                   ? "border-sage bg-sage/10 text-ink"
                   : "border-sand/50 bg-cream/30 text-ink-light hover:border-sand"
@@ -234,7 +237,7 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
             <button
               type="button"
               onClick={() => setShowNewSubcategory(true)}
-              className="rounded-lg border border-dashed border-sand/50 px-2.5 py-1.5 text-xs text-ink-light transition-colors hover:border-sage hover:text-ink"
+              className="rounded-lg border border-dashed border-sand/50 px-3.5 py-2.5 text-sm text-ink-light transition-colors hover:border-sage hover:text-ink"
             >
               +
             </button>
@@ -257,14 +260,14 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
                   if (e.key === "Escape") { setShowNewSubcategory(false); setNewSubcategoryName(""); }
                 }}
                 placeholder="Name..."
-                className="w-24 rounded-lg border border-sand bg-cream/50 px-2 py-1.5 text-xs focus:border-sage focus:outline-none"
+                className="w-28 rounded-lg border border-sand bg-cream/50 px-3 py-2.5 text-sm focus:border-sage focus:outline-none"
                 autoFocus
               />
               <button
                 type="button"
                 onClick={handleCreateSubcategory}
                 disabled={creatingSub || !newSubcategoryName.trim()}
-                className="rounded-lg bg-sage/10 px-2 py-1.5 text-xs text-sage transition-colors hover:bg-sage/20 disabled:opacity-40"
+                className="rounded-lg bg-sage/10 px-3 py-2.5 text-sm text-sage transition-colors hover:bg-sage/20 disabled:opacity-40"
               >
                 {creatingSub ? "..." : "Add"}
               </button>

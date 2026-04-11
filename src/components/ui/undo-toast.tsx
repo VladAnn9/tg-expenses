@@ -50,7 +50,7 @@ export default function UndoToast({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 40 }}
       transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
-      className="fixed bottom-6 left-1/2 z-50 w-[calc(100%-3rem)] max-w-md -translate-x-1/2"
+      className="fixed bottom-24 left-1/2 z-50 w-[calc(100%-3rem)] max-w-md -translate-x-1/2 sm:bottom-6"
     >
       <div className="rounded-xl border border-sand/50 bg-ink px-4 py-3 shadow-lg">
         <div className="flex items-center justify-between gap-3">

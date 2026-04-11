@@ -72,14 +72,14 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
                   setEditingNote(false);
                 }
               }}
-              className="flex-1 min-w-0 rounded-lg border border-sand bg-cream/50 px-3 py-1.5 text-sm focus:border-sage focus:outline-none"
+              className="flex-1 min-w-0 rounded-lg border border-sand bg-cream/50 px-3 py-2 text-base focus:border-sage focus:outline-none"
               placeholder="Add a note..."
               autoFocus
             />
             <button
               onClick={() => saveNote(noteValue)}
               disabled={saving}
-              className="rounded-lg px-3 py-1.5 text-xs text-sage transition-colors hover:bg-sage/10 disabled:opacity-40"
+              className="rounded-lg px-4 py-2.5 text-sm text-sage transition-colors hover:bg-sage/10 disabled:opacity-40"
             >
               Save
             </button>
@@ -87,7 +87,7 @@ export default function AccountCard({ account, onUpdate }: AccountCardProps) {
         ) : (
           <button
             onClick={() => setEditingNote(true)}
-            className="text-sm text-ink-light transition-colors hover:text-ink"
+            className="py-1 text-sm text-ink-light transition-colors hover:text-ink"
           >
             {account.notes || "Add note..."}
           </button>

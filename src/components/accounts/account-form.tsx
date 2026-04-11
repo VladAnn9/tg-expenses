@@ -79,7 +79,7 @@ export default function AccountForm({ onSave, onCancel }: AccountFormProps) {
               key={t}
               type="button"
               onClick={() => setType(t)}
-              className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+              className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                 type === t
                   ? "border-sage bg-sage/10 text-ink"
                   : "border-sand/50 bg-cream/30 text-ink-light hover:border-sand"

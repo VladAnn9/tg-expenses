@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import BottomTabBar from "@/components/nav/bottom-tab-bar";
+import PageTransition from "@/components/nav/page-transition";
 
 const NAV_LINKS = [
   { href: "/dashboard", label: "Home" },
@@ -34,7 +36,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="border-b border-sand/50 bg-cream/50 backdrop-blur-sm">
+      <header className="sticky top-0 z-30 border-b border-sand/50 bg-cream/80 backdrop-blur-md pt-[env(safe-area-inset-top)]">
         <div className="mx-auto flex max-w-2xl items-center justify-between px-6 py-4">
           <Link href="/dashboard" className="flex items-center gap-2.5">
             <Image
@@ -63,7 +65,7 @@ export default async function DashboardLayout({
             </form>
           </div>
         </div>
-        <nav className="mx-auto max-w-2xl overflow-x-auto px-6 pb-2">
+        <nav className="mx-auto hidden max-w-2xl overflow-x-auto px-6 pb-2 sm:block">
           <div className="flex gap-1">
             {NAV_LINKS.map((link) => (
               <Link
@@ -77,9 +79,10 @@ export default async function DashboardLayout({
           </div>
         </nav>
       </header>
-      <main className="mx-auto w-full max-w-2xl flex-1 px-6 py-8">
-        {children}
+      <main className="mx-auto w-full max-w-2xl flex-1 px-6 pt-8 pb-24 sm:pb-8">
+        <PageTransition>{children}</PageTransition>
       </main>
+      <BottomTabBar />
     </div>
   );
 }

@@ -47,7 +47,7 @@ export default function IncomeForm({ income, onSave, onCancel }: IncomeFormProps
           setAccountId(primary?.id ?? accts[0].id);
         }
       });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

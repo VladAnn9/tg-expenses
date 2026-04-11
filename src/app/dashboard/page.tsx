@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { motion, type PanInfo } from "motion/react";
+import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import TelegramLink from "@/components/telegram-link";
 import SpendingSummary from "@/components/dashboard/spending-summary";
 import CategoryChart from "@/components/dashboard/category-chart";
@@ -39,6 +41,7 @@ function getCurrentMonth() {
 }
 
 export default function DashboardPage() {
+  const isMobile = useIsMobile();
   const [month, setMonth] = useState(getCurrentMonth);
   const [summary, setSummary] = useState<SummaryData | null>(null);
   const [insights, setInsights] = useState<Insight[] | null>(null);
@@ -64,6 +67,11 @@ export default function DashboardPage() {
     if (isCurrentMonth) return;
     const d = new Date(year, monthNum, 1);
     setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  };
+
+  const handleMonthSwipe = (_: unknown, info: PanInfo) => {
+    if (info.offset.x < -60) nextMonth();
+    if (info.offset.x > 60) prevMonth();
   };
 
   // Fetch settings + available months once
@@ -183,7 +191,14 @@ export default function DashboardPage() {
         </div>
       </AnimatedSection>
 
-      {/* Widgets — crossfade on month change */}
+      {/* Widgets — crossfade on month change, swipeable */}
+      <motion.div
+        drag={isMobile ? "x" : false}
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.15}
+        dragMomentum={false}
+        onDragEnd={handleMonthSwipe}
+      >
       <AnimatedContent transitionKey={summary.month} className="space-y-8">
         {/* Telegram CTA — current month only */}
         {isCurrentMonth && !hasTelegram && (
@@ -261,6 +276,7 @@ export default function DashboardPage() {
           <RecentExpenses expenses={summary.recent_expenses as Parameters<typeof RecentExpenses>[0]["expenses"]} />
         </AnimatedSection>
       </AnimatedContent>
+      </motion.div>
     </div>
   );
 }

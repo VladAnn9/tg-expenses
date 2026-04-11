@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import ExpenseCard from "@/components/expenses/expense-card";
 import ExpenseForm from "@/components/expenses/expense-form";
@@ -60,8 +60,7 @@ export default function ExpensesPage() {
   });
   const [filterCategory, setFilterCategory] = useState<string>("");
   const [filterSubcategory, setFilterSubcategory] = useState<string>("");
-  const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
-  const [loadingSubcategories, setLoadingSubcategories] = useState(false);
+  const [allSubcategories, setAllSubcategories] = useState<Subcategory[] | null>(null);
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
   const [tab, setTab] = useState<"expenses" | "income">("expenses");
   const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
@@ -97,19 +96,25 @@ export default function ExpensesPage() {
       .catch(() => {});
   }, []);
 
-  // Fetch subcategories when category filter changes
+  // Lazy-fetch all subcategories on first category filter tap, then cache
+  const subcatFetched = useRef(false);
   useEffect(() => {
     setFilterSubcategory("");
-    if (!filterCategory) {
-      setSubcategories([]);
-      return;
+    if (filterCategory && !subcatFetched.current) {
+      subcatFetched.current = true;
+      fetch("/api/subcategories")
+        .then((r) => r.json())
+        .then((data) => setAllSubcategories(data.subcategories ?? []));
     }
-    setLoadingSubcategories(true);
-    fetch(`/api/subcategories?category=${encodeURIComponent(filterCategory)}`)
-      .then((r) => r.json())
-      .then((data) => setSubcategories(data.subcategories ?? []))
-      .finally(() => setLoadingSubcategories(false));
   }, [filterCategory]);
+
+  // Derive filtered subcategories from the cached full list
+  const subcategories = useMemo(
+    () => filterCategory && allSubcategories
+      ? allSubcategories.filter((s) => s.parent_category === filterCategory)
+      : [],
+    [allSubcategories, filterCategory],
+  );
 
   // Income cache: month → IncomeEntry[]
   const incomeCache = useRef(new Map<string, IncomeEntry[]>());
@@ -193,7 +198,6 @@ export default function ExpensesPage() {
     if (!silent) setLoading(false);
   };
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     fetchExpenses();
   }, [fetchExpenses]);
@@ -383,7 +387,7 @@ export default function ExpensesPage() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => setFilterIncomeAccount("")}
-                    className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                    className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                       !filterIncomeAccount
                         ? "border-sage bg-sage/10 text-ink"
                         : "border-sand/50 text-ink-light hover:border-sand"
@@ -395,7 +399,7 @@ export default function ExpensesPage() {
                     <button
                       key={acct.id}
                       onClick={() => setFilterIncomeAccount(filterIncomeAccount === acct.id ? "" : acct.id)}
-                      className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                      className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                         filterIncomeAccount === acct.id
                           ? "border-sage bg-sage/10 text-ink"
                           : "border-sand/50 text-ink-light hover:border-sand"
@@ -487,7 +491,7 @@ export default function ExpensesPage() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => setFilterAccount("")}
-                    className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                    className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                       !filterAccount
                         ? "border-sage bg-sage/10 text-ink"
                         : "border-sand/50 text-ink-light hover:border-sand"
@@ -503,7 +507,7 @@ export default function ExpensesPage() {
                           filterAccount === acct.id ? "" : acct.id,
                         )
                       }
-                      className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                      className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                         filterAccount === acct.id
                           ? "border-sage bg-sage/10 text-ink"
                           : "border-sand/50 text-ink-light hover:border-sand"
@@ -521,7 +525,7 @@ export default function ExpensesPage() {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => setFilterCategory("")}
-                  className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                  className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                     !filterCategory
                       ? "border-sage bg-sage/10 text-ink"
                       : "border-sand/50 text-ink-light hover:border-sand"
@@ -535,7 +539,7 @@ export default function ExpensesPage() {
                     onClick={() =>
                       setFilterCategory(filterCategory === cat ? "" : cat)
                     }
-                    className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                    className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                       filterCategory === cat
                         ? "border-sage bg-sage/10 text-ink"
                         : "border-sand/50 text-ink-light hover:border-sand"
@@ -551,13 +555,13 @@ export default function ExpensesPage() {
             {filterCategory && (
               <AnimatedSection delay={accounts.length > 1 ? 0.15 : 0.1}>
                 <div className="flex flex-wrap gap-2">
-                  {loadingSubcategories ? (
-                    <div className="h-7 w-24 animate-pulse rounded-lg bg-mist/50" />
+                  {allSubcategories === null ? (
+                    <div className="h-10 w-24 animate-pulse rounded-lg bg-mist/50" />
                   ) : (
                     <>
                       <button
                         onClick={() => setFilterSubcategory("")}
-                        className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                        className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                           !filterSubcategory
                             ? "border-sage bg-sage/10 text-ink"
                             : "border-sand/50 text-ink-light hover:border-sand"
@@ -573,7 +577,7 @@ export default function ExpensesPage() {
                               filterSubcategory === sub.id ? "" : sub.id,
                             )
                           }
-                          className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                          className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                             filterSubcategory === sub.id
                               ? "border-sage bg-sage/10 text-ink"
                               : "border-sand/50 text-ink-light hover:border-sand"
