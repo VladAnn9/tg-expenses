@@ -1,6 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdId, isHouseholdOwner } from "@/lib/supabase/household";
+
+/** Check if user can manage this account (own account or household owner). */
+async function canManageAccount(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  accountId: string
+) {
+  const { data: account } = await admin
+    .from("accounts")
+    .select("id, user_id, household_id, is_primary")
+    .eq("id", accountId)
+    .single();
+
+  if (!account) return { allowed: false as const, account: null };
+
+  // Own account — always allowed
+  if (account.user_id === userId) return { allowed: true as const, account };
+
+  // Household account — check if user is owner
+  if (account.household_id) {
+    const owner = await isHouseholdOwner(admin, userId, account.household_id);
+    if (owner) return { allowed: true as const, account };
+  }
+
+  return { allowed: false as const, account: null };
+}
 
 export async function PATCH(
   req: NextRequest,
@@ -16,6 +43,13 @@ export async function PATCH(
   }
 
   const { id } = await params;
+  const admin = createAdminClient();
+
+  const { allowed, account } = await canManageAccount(admin, user.id, id);
+  if (!allowed || !account) {
+    return NextResponse.json({ error: "Account not found" }, { status: 404 });
+  }
+
   const body = await req.json();
   const updates: Record<string, unknown> = {};
 
@@ -33,20 +67,27 @@ export async function PATCH(
   }
 
   if (body.is_primary === true) {
-    // Unset current primary
-    await supabase
-      .from("accounts")
-      .update({ is_primary: false })
-      .eq("user_id", user.id)
-      .eq("is_primary", true);
+    // Unset current primary across household or user scope
+    if (account.household_id) {
+      await admin
+        .from("accounts")
+        .update({ is_primary: false })
+        .eq("household_id", account.household_id)
+        .eq("is_primary", true);
+    } else {
+      await admin
+        .from("accounts")
+        .update({ is_primary: false })
+        .eq("user_id", user.id)
+        .eq("is_primary", true);
+    }
     updates.is_primary = true;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await admin
     .from("accounts")
     .update(updates)
     .eq("id", id)
-    .eq("user_id", user.id)
     .select()
     .single();
 
@@ -73,15 +114,8 @@ export async function DELETE(
   const { id } = await params;
   const admin = createAdminClient();
 
-  // Check if account is primary
-  const { data: account } = await admin
-    .from("accounts")
-    .select("is_primary")
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .single();
-
-  if (!account) {
+  const { allowed, account } = await canManageAccount(admin, user.id, id);
+  if (!allowed || !account) {
     return NextResponse.json({ error: "Account not found" }, { status: 404 });
   }
 
@@ -93,19 +127,25 @@ export async function DELETE(
   }
 
   // Check for linked expenses
-  const { count } = await admin
+  const { count: expCount } = await admin
     .from("expenses")
     .select("id", { count: "exact", head: true })
     .eq("account_id", id);
 
-  if ((count ?? 0) > 0) {
+  // Check for linked income
+  const { count: incCount } = await admin
+    .from("income_entries")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", id);
+
+  if ((expCount ?? 0) > 0 || (incCount ?? 0) > 0) {
     return NextResponse.json(
-      { error: "Reassign expenses before deleting this account" },
+      { error: "Reassign expenses/income before deleting this account" },
       { status: 400 }
     );
   }
 
-  await admin.from("accounts").delete().eq("id", id).eq("user_id", user.id);
+  await admin.from("accounts").delete().eq("id", id);
 
   return NextResponse.json({ success: true });
 }

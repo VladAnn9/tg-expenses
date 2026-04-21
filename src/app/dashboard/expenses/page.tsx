@@ -19,6 +19,7 @@ interface IncomeEntry {
   note: string | null;
   income_date: string;
   account_id?: string;
+  created_by?: string;
 }
 
 interface Expense {
@@ -463,12 +464,22 @@ export default function ExpensesPage() {
                 filtered.map((entry, i) => (
                   <AnimatedSection key={entry.id} delay={i * 0.03}>
                     <IncomeCard
-                      income={entry}
+                      income={{
+                        ...entry,
+                        account_name: accounts.find((a) => a.id === entry.account_id)?.name,
+                      }}
                       isEditing={editingIncomeId === entry.id}
                       onEditStart={() => { setEditingIncomeId(entry.id); setShowIncomeForm(false); }}
                       onEditEnd={() => setEditingIncomeId(null)}
                       onUpdate={refreshIncome}
                       onDelete={() => handleDeleteIncome(entry.id, entry.source_label || "Income")}
+                      showAccount={accounts.length > 1}
+                      loggedByName={
+                        Object.keys(memberNames).length > 1 &&
+                        entry.created_by
+                          ? memberNames[entry.created_by]
+                          : undefined
+                      }
                     />
                   </AnimatedSection>
                 ))

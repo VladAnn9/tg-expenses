@@ -132,6 +132,13 @@ export async function POST(req: NextRequest) {
     .update({ household_id: household.id })
     .eq("id", user.id);
 
+  // Link owner's existing accounts to the new household
+  await admin
+    .from("accounts")
+    .update({ household_id: household.id })
+    .eq("user_id", user.id)
+    .is("household_id", null);
+
   return NextResponse.json(household, { status: 201 });
 }
 
@@ -163,13 +170,66 @@ export async function DELETE() {
 
   const householdId = membership.household_id;
 
+  // Get all non-owner members so we can clone accounts for them
+  const { data: otherMembers } = await admin
+    .from("household_members")
+    .select("user_id")
+    .eq("household_id", householdId)
+    .neq("user_id", user.id);
+
+  const { data: householdAccounts } = await admin
+    .from("accounts")
+    .select("id, name, type, currency, notes, is_primary")
+    .eq("household_id", householdId);
+
+  // Clone household accounts for each non-owner member and reassign their data
+  if (otherMembers && householdAccounts) {
+    for (const member of otherMembers) {
+      for (const acct of householdAccounts) {
+        const { data: cloned } = await admin
+          .from("accounts")
+          .insert({
+            user_id: member.user_id,
+            name: acct.name,
+            type: acct.type,
+            currency: acct.currency,
+            balance: 0,
+            notes: acct.notes,
+            is_primary: acct.is_primary,
+            household_id: null,
+          })
+          .select("id")
+          .single();
+
+        if (cloned) {
+          await admin
+            .from("expenses")
+            .update({ account_id: cloned.id })
+            .eq("account_id", acct.id)
+            .eq("created_by", member.user_id);
+          await admin
+            .from("income_entries")
+            .update({ account_id: cloned.id })
+            .eq("account_id", acct.id)
+            .eq("created_by", member.user_id);
+        }
+      }
+    }
+  }
+
+  // Detach household accounts — they become personal accounts of the owner
+  await admin
+    .from("accounts")
+    .update({ household_id: null })
+    .eq("household_id", householdId);
+
   // Clear household_id for all members
   await admin
     .from("profiles")
     .update({ household_id: null })
     .eq("household_id", householdId);
 
-  // Delete members (cascade will handle, but explicit for clarity)
+  // Delete members
   await admin
     .from("household_members")
     .delete()

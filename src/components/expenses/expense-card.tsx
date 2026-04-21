@@ -8,6 +8,7 @@ import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import SwipeableCard from "@/components/ui/swipeable-card";
 import type { ExpenseCategory } from "@/types/database";
 import ExpenseForm from "./expense-form";
+import CardTags from "./card-tags";
 
 interface ExpenseCardProps {
   expense: {
@@ -104,7 +105,7 @@ export default function ExpenseCard({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: -4 }}
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
-            className="rounded-2xl border border-sage/30 bg-cream p-4 shadow-sm"
+            className="overflow-hidden rounded-2xl border border-sage/30 bg-cream p-4 shadow-sm"
           >
             <ExpenseForm
               expense={expense}
@@ -139,17 +140,12 @@ export default function ExpenseCard({
                     </p>
                     <p className="text-xs text-ink-light">
                       {expense.expense_date}
-                      {loggedByName && (
-                        <span className="ml-2 rounded bg-sage/10 px-1.5 py-0.5 text-[10px] text-sage">
-                          {loggedByName}
-                        </span>
-                      )}
-                      {showAccount && expense.account_name && (
-                        <span className="ml-2 rounded bg-mist px-1.5 py-0.5 text-[10px]">
-                          {expense.account_name}
-                        </span>
-                      )}
                     </p>
+                    <CardTags
+                      loggedByName={loggedByName}
+                      showAccount={showAccount}
+                      accountName={expense.account_name}
+                    />
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">

@@ -6,6 +6,7 @@ import { SaveIcon, ClearIcon, TrashIcon } from "@/components/ui/icons";
 import { useIsMobile } from "@/lib/hooks/use-is-mobile";
 import SwipeableCard from "@/components/ui/swipeable-card";
 import IncomeForm from "./income-form";
+import CardTags from "./card-tags";
 
 interface IncomeCardProps {
   income: {
@@ -14,12 +15,15 @@ interface IncomeCardProps {
     source_label: string | null;
     note: string | null;
     income_date: string;
+    account_name?: string;
   };
   isEditing: boolean;
   onEditStart: () => void;
   onEditEnd: () => void;
   onUpdate: () => void;
   onDelete?: () => void;
+  loggedByName?: string;
+  showAccount?: boolean;
 }
 
 export default function IncomeCard({
@@ -29,6 +33,8 @@ export default function IncomeCard({
   onEditEnd,
   onUpdate,
   onDelete,
+  loggedByName,
+  showAccount,
 }: IncomeCardProps) {
   const [editingNote, setEditingNote] = useState(false);
   const [noteValue, setNoteValue] = useState(income.note ?? "");
@@ -93,7 +99,7 @@ export default function IncomeCard({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: -4 }}
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
-            className="rounded-2xl border border-sage/30 bg-cream p-4 shadow-sm"
+            className="overflow-hidden rounded-2xl border border-sage/30 bg-cream p-4 shadow-sm"
           >
             <IncomeForm
               income={income}
@@ -127,6 +133,11 @@ export default function IncomeCard({
                     <p className="text-xs text-ink-light">
                       {income.income_date}
                     </p>
+                    <CardTags
+                      loggedByName={loggedByName}
+                      showAccount={showAccount}
+                      accountName={income.account_name}
+                    />
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">

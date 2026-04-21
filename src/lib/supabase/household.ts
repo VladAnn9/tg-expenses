@@ -25,3 +25,37 @@ export async function getHouseholdMemberIds(
 
   return members.map((m) => m.user_id);
 }
+
+/**
+ * Returns the household_id for the given user, or null if not in a household.
+ */
+export async function getHouseholdId(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string
+): Promise<string | null> {
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("household_id")
+    .eq("id", userId)
+    .single();
+
+  return profile?.household_id ?? null;
+}
+
+/**
+ * Returns true if the user is the owner of their household.
+ */
+export async function isHouseholdOwner(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  householdId: string
+): Promise<boolean> {
+  const { data } = await admin
+    .from("household_members")
+    .select("role")
+    .eq("household_id", householdId)
+    .eq("user_id", userId)
+    .single();
+
+  return data?.role === "owner";
+}

@@ -61,6 +61,7 @@ export type Database = {
         Row: {
           id: string;
           user_id: string;
+          household_id: string | null;
           name: string;
           type: AccountType;
           balance: number;
@@ -72,6 +73,7 @@ export type Database = {
         Insert: {
           id?: string;
           user_id: string;
+          household_id?: string | null;
           name?: string;
           type?: AccountType;
           balance?: number;
@@ -83,6 +85,7 @@ export type Database = {
         Update: {
           id?: string;
           user_id?: string;
+          household_id?: string | null;
           name?: string;
           type?: AccountType;
           balance?: number;

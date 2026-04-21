@@ -107,6 +107,37 @@ export async function POST(req: NextRequest) {
     .update({ used_at: new Date().toISOString() })
     .eq("id", invite.id);
 
+  // Clean up member's personal accounts — they'll use household accounts now.
+  // Only delete accounts with zero linked expenses and income.
+  const { data: personalAccounts } = await admin
+    .from("accounts")
+    .select("id")
+    .eq("user_id", user.id)
+    .is("household_id", null);
+
+  if (personalAccounts) {
+    for (const acct of personalAccounts) {
+      const { count: expCount } = await admin
+        .from("expenses")
+        .select("id", { count: "exact", head: true })
+        .eq("account_id", acct.id);
+      const { count: incCount } = await admin
+        .from("income_entries")
+        .select("id", { count: "exact", head: true })
+        .eq("account_id", acct.id);
+
+      if ((expCount ?? 0) === 0 && (incCount ?? 0) === 0) {
+        await admin.from("accounts").delete().eq("id", acct.id);
+      } else {
+        // Account has history — absorb it into the household
+        await admin
+          .from("accounts")
+          .update({ household_id: invite.household_id })
+          .eq("id", acct.id);
+      }
+    }
+  }
+
   return NextResponse.json({
     household_id: invite.household_id,
     role: "member",
