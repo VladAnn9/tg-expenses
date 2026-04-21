@@ -63,12 +63,17 @@ async function findUserByTelegramId(telegramId: number) {
   return data;
 }
 
-async function getUserPrimaryAccount(userId: string) {
+async function getUserPrimaryAccount(userId: string, householdId?: string | null) {
   const supabase = createAdminClient();
+
+  // Household members share accounts — query by household, not user
+  const filterCol = householdId ? "household_id" : "user_id";
+  const filterVal = householdId ?? userId;
+
   const { data } = await supabase
     .from("accounts")
     .select("id, name")
-    .eq("user_id", userId)
+    .eq(filterCol, filterVal)
     .eq("is_primary", true)
     .limit(1)
     .single();
@@ -77,20 +82,62 @@ async function getUserPrimaryAccount(userId: string) {
   const { data: fallback } = await supabase
     .from("accounts")
     .select("id, name")
-    .eq("user_id", userId)
+    .eq(filterCol, filterVal)
     .order("created_at")
     .limit(1)
     .single();
   return fallback;
 }
 
-async function getUserSubcategories(userId: string): Promise<string[]> {
+async function getUserSubcategories(userId: string, householdId?: string | null): Promise<string[]> {
   const supabase = createAdminClient();
-  const { data } = await supabase
-    .from("subcategories")
-    .select("name")
-    .eq("created_by", userId);
+  const query = householdId
+    ? supabase.from("subcategories").select("name").eq("household_id", householdId)
+    : supabase.from("subcategories").select("name").eq("created_by", userId);
+  const { data } = await query;
   return (data ?? []).map((s) => s.name);
+}
+
+async function getFrequentSubcategories(
+  parentCategory: ExpenseCategory,
+  userId: string,
+  householdId: string | null
+): Promise<Array<{ id: string; name: string }>> {
+  const supabase = createAdminClient();
+  const query = householdId
+    ? supabase.from("subcategories").select("id, name").eq("parent_category", parentCategory).eq("household_id", householdId)
+    : supabase.from("subcategories").select("id, name").eq("parent_category", parentCategory).eq("created_by", userId);
+  const { data: subs } = await query;
+  if (!subs || subs.length === 0) return [];
+
+  const withCounts = await Promise.all(
+    subs.map(async (sub) => {
+      const { count } = await supabase
+        .from("expenses")
+        .select("id", { count: "exact", head: true })
+        .eq("subcategory_id", sub.id);
+      return { id: sub.id, name: sub.name, count: count ?? 0 };
+    })
+  );
+  return withCounts
+    .filter((s) => s.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5)
+    .map(({ id, name }) => ({ id, name }));
+}
+
+async function findExistingSubcategory(
+  name: string,
+  parentCategory: ExpenseCategory,
+  userId: string,
+  householdId: string | null
+): Promise<string | null> {
+  const supabase = createAdminClient();
+  const query = householdId
+    ? supabase.from("subcategories").select("name").eq("parent_category", parentCategory).eq("household_id", householdId).ilike("name", name)
+    : supabase.from("subcategories").select("name").eq("parent_category", parentCategory).eq("created_by", userId).ilike("name", name);
+  const { data } = await query.limit(1).single();
+  return data?.name ?? null;
 }
 
 async function getKnownMerchants(householdId: string | null): Promise<string[]> {
@@ -424,8 +471,12 @@ export function registerHandlers(bot: Bot) {
         .text("Date", `edit_date:${pendingId}`)
         .row()
         .text("Merchant", `edit_merchant:${pendingId}`)
-        .text("Note", `edit_note:${pendingId}`)
-        .text("🔙 Back", `back:${pendingId}`);
+        .text("Note", `edit_note:${pendingId}`);
+      if (pending.type === "expense") {
+        const subLabel = pending.subcategory ? `Subcategory (${pending.subcategory})` : "Subcategory";
+        keyboard.row().text(subLabel, `edit_sub:${pendingId}`);
+      }
+      keyboard.row().text("🔙 Back", `back:${pendingId}`);
 
       await ctx.editMessageText("What would you like to change?", {
         reply_markup: keyboard,
@@ -468,11 +519,80 @@ export function registerHandlers(bot: Bot) {
       if (!pending || pending.type !== "expense") {
         return ctx.answerCallbackQuery({ text: "Expired." });
       }
+      const oldCategory = pending.category;
       pending.category = category as ExpenseCategory;
+      if (oldCategory !== category) {
+        pending.subcategory = null;
+      }
       await ctx.answerCallbackQuery({ text: `Category: ${category}` });
       await ctx.editMessageText(formatConfirmation(pending), {
         reply_markup: confirmationKeyboard(pid),
       });
+      return;
+    }
+
+    // Subcategory picker
+    if (action === "edit_sub") {
+      const pending = pendingItems.get(pendingId);
+      if (!pending || pending.type !== "expense") {
+        return ctx.answerCallbackQuery({ text: "Expired." });
+      }
+      await ctx.answerCallbackQuery();
+      const userProfile = await findUserByTelegramId(ctx.from!.id);
+      const frequent = await getFrequentSubcategories(
+        pending.category,
+        pending.userId,
+        userProfile?.household_id ?? null
+      );
+      const keyboard = new InlineKeyboard();
+      for (let i = 0; i < frequent.length; i++) {
+        keyboard.text(frequent[i].name, `set_sub:${pendingId}:${frequent[i].id}`);
+        if (i % 2 === 1) keyboard.row();
+      }
+      if (frequent.length % 2 === 1) keyboard.row();
+      keyboard
+        .text("🚫 None", `set_sub:${pendingId}:none`)
+        .text("✏️ Type custom", `sub_custom:${pendingId}`)
+        .row()
+        .text("🔙 Back", `edit:${pendingId}`);
+      await ctx.editMessageText("Select subcategory:", {
+        reply_markup: keyboard,
+      });
+      return;
+    }
+
+    if (action === "set_sub") {
+      const [, pid, subId] = data.split(":");
+      const pending = pendingItems.get(pid);
+      if (!pending || pending.type !== "expense") {
+        return ctx.answerCallbackQuery({ text: "Expired." });
+      }
+      if (subId === "none") {
+        pending.subcategory = null;
+      } else {
+        const supabase = createAdminClient();
+        const { data: sub } = await supabase
+          .from("subcategories")
+          .select("name")
+          .eq("id", subId)
+          .single();
+        pending.subcategory = sub?.name ?? null;
+      }
+      await ctx.answerCallbackQuery({ text: pending.subcategory ? `Subcategory: ${pending.subcategory}` : "Subcategory cleared" });
+      await ctx.editMessageText(formatConfirmation(pending), {
+        reply_markup: confirmationKeyboard(pid),
+      });
+      return;
+    }
+
+    if (action === "sub_custom") {
+      const pending = pendingItems.get(pendingId);
+      if (!pending) {
+        return ctx.answerCallbackQuery({ text: "Expired." });
+      }
+      editStates.set(ctx.from!.id, { pendingId, field: "subcategory" });
+      await ctx.answerCallbackQuery();
+      await ctx.editMessageText("Type the subcategory name:");
       return;
     }
 
@@ -538,6 +658,17 @@ export function registerHandlers(bot: Bot) {
         }
         if (pending.type === "expense") pending.expense_date = value;
         else pending.income_date = value;
+      } else if (field === "subcategory" && pending.type === "expense") {
+        if (value.length === 0) {
+          return ctx.reply("Please enter a subcategory name.");
+        }
+        const existing = await findExistingSubcategory(
+          value,
+          pending.category,
+          pending.userId,
+          userProfile.household_id ?? null
+        );
+        pending.subcategory = existing ?? value;
       }
 
       return ctx.reply(formatConfirmation(pending), {
@@ -546,14 +677,14 @@ export function registerHandlers(bot: Bot) {
     }
 
     // AI text parsing
-    const account = await getUserPrimaryAccount(userId);
+    const account = await getUserPrimaryAccount(userId, userProfile.household_id);
     if (!account) {
       return ctx.reply(
         "No account found. Please set up your account on the web app first."
       );
     }
 
-    const subcategories = await getUserSubcategories(userId);
+    const subcategories = await getUserSubcategories(userId, userProfile.household_id);
     const result = await parseTextExpense(ctx.message.text, subcategories);
     if (isParseError(result)) {
       return ctx.reply(
@@ -620,7 +751,7 @@ export function registerHandlers(bot: Bot) {
     if (!userProfile) return;
     const userId = userProfile.id;
 
-    const account = await getUserPrimaryAccount(userId);
+    const account = await getUserPrimaryAccount(userId, userProfile.household_id);
     if (!account) {
       return ctx.reply("No account found. Set up on the web app first.");
     }
@@ -640,7 +771,7 @@ export function registerHandlers(bot: Bot) {
         return ctx.reply("Couldn't understand the audio. Try typing instead.");
       }
 
-      const subcategories = await getUserSubcategories(userId);
+      const subcategories = await getUserSubcategories(userId, userProfile.household_id);
       const result = await parseVoiceExpense(transcript, subcategories);
       if (isParseError(result)) {
         return ctx.reply(
@@ -706,7 +837,7 @@ export function registerHandlers(bot: Bot) {
     if (!userProfile) return;
     const userId = userProfile.id;
 
-    const account = await getUserPrimaryAccount(userId);
+    const account = await getUserPrimaryAccount(userId, userProfile.household_id);
     if (!account) {
       return ctx.reply("No account found. Set up on the web app first.");
     }
