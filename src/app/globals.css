@@ -56,3 +56,64 @@ body::before {
   background-repeat: repeat;
   background-size: 256px 256px;
 }
+
+/* Landing — gradient mesh drift */
+@keyframes zen-mesh-drift {
+  0% {
+    background-position: 0% 0%, 100% 0%, 100% 100%;
+  }
+  100% {
+    background-position: 3% 3%, 97% 3%, 97% 97%;
+  }
+}
+
+/* Landing — typing dots */
+@keyframes zen-bounce-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+/* Landing — waveform playback sweep */
+@keyframes zen-wave-sweep {
+  0% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
+
+/* Landing — hero headline weight breathing */
+@keyframes zen-weight-breath {
+  0% {
+    font-weight: 300;
+  }
+  100% {
+    font-weight: 400;
+  }
+}
+
+/* Landing — checkmark draw */
+@keyframes zen-check-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zen-reduced-motion-off {
+    animation: none !important;
+    transition: none !important;
+  }
+}
