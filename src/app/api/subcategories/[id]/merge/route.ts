@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdMemberIds } from "@/lib/supabase/household";
 
 export async function POST(
   req: NextRequest,
@@ -24,19 +25,21 @@ export async function POST(
   }
 
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
 
-  // Reassign all expenses from source to target
+  // Reassign household expenses from source to target subcategory.
   await admin
     .from("expenses")
     .update({ subcategory_id: target_id })
-    .eq("subcategory_id", id);
+    .eq("subcategory_id", id)
+    .in("created_by", memberIds);
 
-  // Delete source subcategory
+  // Delete source subcategory if it belongs to this household.
   await admin
     .from("subcategories")
     .delete()
     .eq("id", id)
-    .eq("created_by", user.id);
+    .in("created_by", memberIds);
 
   return NextResponse.json({ success: true });
 }

@@ -16,7 +16,21 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminClient();
   const memberIds = await getHouseholdMemberIds(admin, user.id);
-  const category = req.nextUrl.searchParams.get("category");
+  const { searchParams } = req.nextUrl;
+  const category = searchParams.get("category");
+  const month = searchParams.get("month");
+  const accountId = searchParams.get("account_id");
+
+  let dateRange: { startDate: string; endDate: string } | null = null;
+  if (month && /^\d{4}-\d{2}$/.test(month)) {
+    const [year, monthNum] = month.split("-").map(Number);
+    const startDate = `${year}-${String(monthNum).padStart(2, "0")}-01`;
+    const endDate =
+      monthNum === 12
+        ? `${year + 1}-01-01`
+        : `${year}-${String(monthNum + 1).padStart(2, "0")}-01`;
+    dateRange = { startDate, endDate };
+  }
 
   let query = admin
     .from("subcategories")
@@ -30,13 +44,25 @@ export async function GET(req: NextRequest) {
 
   const { data: subcategories } = await query;
 
-  // Get expense counts per subcategory
+  // Count expenses per subcategory within the same scope the UI applies
+  // (household members + month + account). Counting all-time/all-users would
+  // not match the filtered list shown to the user.
   const result = await Promise.all(
     (subcategories ?? []).map(async (sub) => {
-      const { count } = await admin
+      let countQuery = admin
         .from("expenses")
         .select("id", { count: "exact", head: true })
-        .eq("subcategory_id", sub.id);
+        .eq("subcategory_id", sub.id)
+        .in("created_by", memberIds);
+      if (dateRange) {
+        countQuery = countQuery
+          .gte("expense_date", dateRange.startDate)
+          .lt("expense_date", dateRange.endDate);
+      }
+      if (accountId) {
+        countQuery = countQuery.eq("account_id", accountId);
+      }
+      const { count } = await countQuery;
       return { ...sub, expense_count: count ?? 0 };
     })
   );

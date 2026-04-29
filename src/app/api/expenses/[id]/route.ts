@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdMemberIds } from "@/lib/supabase/household";
 import { isValidCategory } from "@/lib/utils/categories";
 
 export async function PATCH(
@@ -45,11 +46,14 @@ export async function PATCH(
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
-  const { data, error } = await supabase
+  const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
+
+  const { data, error } = await admin
     .from("expenses")
     .update(updates)
     .eq("id", id)
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .select()
     .single();
 
@@ -75,12 +79,13 @@ export async function DELETE(
 
   const { id } = await params;
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
 
   await admin
     .from("expenses")
     .delete()
     .eq("id", id)
-    .eq("created_by", user.id);
+    .in("created_by", memberIds);
 
   return NextResponse.json({ success: true });
 }

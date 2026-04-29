@@ -97,17 +97,33 @@ export default function ExpensesPage() {
       .catch(() => {});
   }, []);
 
-  // Lazy-fetch all subcategories on first category filter tap, then cache
-  const subcatFetched = useRef(false);
+  // Reset subcategory selection whenever the parent category changes
   useEffect(() => {
     setFilterSubcategory("");
-    if (filterCategory && !subcatFetched.current) {
-      subcatFetched.current = true;
-      fetch("/api/subcategories")
-        .then((r) => r.json())
-        .then((data) => setAllSubcategories(data.subcategories ?? []));
-    }
   }, [filterCategory]);
+
+  // Lazy-fetch subcategories scoped to the current view (month + account).
+  // Cache per scope so swapping back doesn't refetch.
+  const subcatCache = useRef(new Map<string, Subcategory[]>());
+  useEffect(() => {
+    if (!filterCategory) return;
+    const key = `${month}|${filterAccount}`;
+    const cached = subcatCache.current.get(key);
+    if (cached) {
+      setAllSubcategories(cached);
+      return;
+    }
+    setAllSubcategories(null);
+    const params = new URLSearchParams({ month });
+    if (filterAccount) params.set("account_id", filterAccount);
+    fetch(`/api/subcategories?${params}`)
+      .then((r) => r.json())
+      .then((data) => {
+        const subs: Subcategory[] = data.subcategories ?? [];
+        subcatCache.current.set(key, subs);
+        setAllSubcategories(subs);
+      });
+  }, [filterCategory, month, filterAccount]);
 
   // Derive filtered subcategories from the cached full list
   const subcategories = useMemo(
@@ -209,6 +225,13 @@ export default function ExpensesPage() {
     for (const key of cache.current.keys()) {
       if (key.startsWith(`${month}|`)) {
         cache.current.delete(key);
+      }
+    }
+    // Subcategory counts are scoped per (month, account) and depend on the
+    // expense data that just changed — invalidate matching scopes too.
+    for (const key of subcatCache.current.keys()) {
+      if (key.startsWith(`${month}|`)) {
+        subcatCache.current.delete(key);
       }
     }
     fetchExpenses({ invalidate: true });

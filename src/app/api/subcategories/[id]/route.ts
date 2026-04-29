@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdMemberIds } from "@/lib/supabase/household";
 
 export async function PATCH(
   req: NextRequest,
@@ -23,11 +24,13 @@ export async function PATCH(
   }
 
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
+
   const { data, error } = await admin
     .from("subcategories")
     .update({ name: body.name.trim() })
     .eq("id", id)
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .select()
     .single();
 
@@ -53,12 +56,14 @@ export async function DELETE(
 
   const { id } = await params;
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
 
-  // Check if any expenses use this subcategory
+  // Check if any household expense still uses this subcategory.
   const { count } = await admin
     .from("expenses")
     .select("id", { count: "exact", head: true })
-    .eq("subcategory_id", id);
+    .eq("subcategory_id", id)
+    .in("created_by", memberIds);
 
   if ((count ?? 0) > 0) {
     return NextResponse.json(
@@ -71,7 +76,7 @@ export async function DELETE(
     .from("subcategories")
     .delete()
     .eq("id", id)
-    .eq("created_by", user.id);
+    .in("created_by", memberIds);
 
   return NextResponse.json({ success: true });
 }

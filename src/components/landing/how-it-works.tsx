@@ -75,6 +75,8 @@ function MomentBlock({
 
 export default function HowItWorks() {
   const [activeRound, setActiveRound] = useState(0);
+  const demoRef = useRef<HTMLDivElement>(null);
+  const demoInView = useInView(demoRef, { amount: 0.15 });
 
   return (
     <section id="how" className="relative scroll-mt-16">
@@ -119,8 +121,15 @@ export default function HowItWorks() {
 
           {/* Sticky demo on desktop; inline on mobile */}
           <div className="lg:col-span-5 order-1 lg:order-2 mb-10 lg:mb-0">
-            <div className="lg:sticky lg:top-[calc(56px+10vh)] flex justify-center lg:justify-end">
-              <BreathingDemo size="feature" round={activeRound} />
+            <div
+              ref={demoRef}
+              className="lg:sticky lg:top-[calc(56px+10vh)] flex justify-center lg:justify-end"
+            >
+              <BreathingDemo
+                size="feature"
+                round={activeRound}
+                paused={!demoInView}
+              />
             </div>
           </div>
         </div>

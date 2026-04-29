@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getHouseholdMemberIds } from "@/lib/supabase/household";
 
 export async function PATCH(
   req: NextRequest,
@@ -18,6 +19,7 @@ export async function PATCH(
   const { id } = await params;
   const body = await req.json();
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
 
   const updates: Record<string, unknown> = {};
   if (body.amount !== undefined) {
@@ -38,7 +40,7 @@ export async function PATCH(
     .from("income_entries")
     .update(updates)
     .eq("id", id)
-    .eq("created_by", user.id)
+    .in("created_by", memberIds)
     .select()
     .single();
 
@@ -64,12 +66,13 @@ export async function DELETE(
 
   const { id } = await params;
   const admin = createAdminClient();
+  const memberIds = await getHouseholdMemberIds(admin, user.id);
 
   await admin
     .from("income_entries")
     .delete()
     .eq("id", id)
-    .eq("created_by", user.id);
+    .in("created_by", memberIds);
 
   return NextResponse.json({ success: true });
 }
