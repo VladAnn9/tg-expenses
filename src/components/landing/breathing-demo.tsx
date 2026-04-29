@@ -49,6 +49,14 @@ const ROUNDS: Round[] = [
     amount: 90.0,
     monthlyTotal: 420,
   },
+  {
+    voice: "four-fifty on a flight to Berlin",
+    merchant: "LOT",
+    category: "Travel",
+    emoji: "✈️",
+    amount: 450.0,
+    monthlyTotal: 1280,
+  },
 ];
 
 const TIMELINE = {

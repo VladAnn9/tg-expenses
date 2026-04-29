@@ -40,11 +40,12 @@ const HouseholdAccent = () => (
 const PieAccent = () => {
   // Mini pie-ring preview using the category palette
   const segments = [
-    { color: "#8B9D83", pct: 0.32 }, // Food/sage
-    { color: "#A67C52", pct: 0.22 }, // Dining
-    { color: "#C07654", pct: 0.18 }, // Transport/terracotta
-    { color: "#D4C5B2", pct: 0.15 }, // Shopping/sand
-    { color: "#6B6560", pct: 0.13 }, // Bills/ink-light
+    { color: "#8B9D83", pct: 0.28 }, // Food/sage
+    { color: "#A67C52", pct: 0.2 }, // Dining
+    { color: "#C07654", pct: 0.16 }, // Transport/terracotta
+    { color: "#7A8B9D", pct: 0.12 }, // Travel/horizon
+    { color: "#D4C5B2", pct: 0.13 }, // Shopping/sand
+    { color: "#6B6560", pct: 0.11 }, // Bills/ink-light
   ];
   const C = 2 * Math.PI * 14;
   let offset = 0;

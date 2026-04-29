@@ -69,6 +69,7 @@ const COLORS: Record<ExpenseCategory, string> = {
   Housing: "#8A7B6B",
   Bills: "#6B6560",
   Transport: "#C07654",
+  Travel: "#7A8B9D",
   Shopping: "#D4C5B2",
   Entertainment: "#A68B6B",
   Health: "#7A8B7A",

@@ -4,6 +4,7 @@ export type ExpenseCategory =
   | "Housing"
   | "Bills"
   | "Transport"
+  | "Travel"
   | "Shopping"
   | "Entertainment"
   | "Health"
