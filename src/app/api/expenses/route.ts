@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
     .gte("expense_date", startDate)
     .lt("expense_date", endDate)
     .order("expense_date", { ascending: false })
+    .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
 
   if (category && isValidCategory(category)) {

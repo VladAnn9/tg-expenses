@@ -218,12 +218,12 @@ export async function GET(req: NextRequest) {
     safeToSpend = runningBalance - monthlySubsTotal;
   }
 
-  // Recent expenses
+  // Recent expenses — by creation time, so just-logged entries always appear at top
   const { data: recent } = await admin
     .from("expenses")
     .select("id, amount, category, merchant, expense_date, note, created_by")
     .in("created_by", memberIds)
-    .order("expense_date", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(10);
 
   return NextResponse.json({
