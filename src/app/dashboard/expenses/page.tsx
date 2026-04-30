@@ -99,10 +99,14 @@ export default function ExpensesPage() {
       .catch(() => {});
   }, []);
 
-  // Reset subcategory selection whenever the parent category changes
-  useEffect(() => {
+  // Reset subcategory selection whenever the parent category changes.
+  // Adjusting state during render is the React-recommended fix for derived
+  // resets — avoids the cascading render that an effect would cause.
+  const [prevFilterCategory, setPrevFilterCategory] = useState(filterCategory);
+  if (filterCategory !== prevFilterCategory) {
+    setPrevFilterCategory(filterCategory);
     setFilterSubcategory("");
-  }, [filterCategory]);
+  }
 
   // Lazy-fetch subcategories scoped to the current view (month + account).
   // Cache per scope so swapping back doesn't refetch.
@@ -174,6 +178,31 @@ export default function ExpensesPage() {
 
   const cacheKey = `${month}|${filterCategory}|${filterAccount}|${filterSubcategory}`;
 
+  const fetchFromApi = useCallback(
+    async (key: string, silent: boolean) => {
+      const [m, cat, acct, subcat] = key.split("|");
+      const params = new URLSearchParams({ month: m, limit: "50" });
+      if (cat) params.set("category", cat);
+      if (acct) params.set("account_id", acct);
+      if (subcat) params.set("subcategory_id", subcat);
+
+      const res = await fetch(`/api/expenses?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        cache.current.set(key, data.expenses);
+        // Only update UI if we're still on the same key
+        if (
+          `${month}|${filterCategory}|${filterAccount}|${filterSubcategory}` ===
+          key
+        ) {
+          setExpenses(data.expenses);
+        }
+      }
+      if (!silent) setLoading(false);
+    },
+    [month, filterCategory, filterAccount, filterSubcategory],
+  );
+
   const fetchExpenses = useCallback(
     async (opts?: { invalidate?: boolean }) => {
       const key = `${month}|${filterCategory}|${filterAccount}|${filterSubcategory}`;
@@ -193,30 +222,8 @@ export default function ExpensesPage() {
 
       await fetchFromApi(key, false);
     },
-    [month, filterCategory, filterAccount, filterSubcategory],
+    [month, filterCategory, filterAccount, filterSubcategory, fetchFromApi],
   );
-
-  const fetchFromApi = async (key: string, silent: boolean) => {
-    const [m, cat, acct, subcat] = key.split("|");
-    const params = new URLSearchParams({ month: m, limit: "50" });
-    if (cat) params.set("category", cat);
-    if (acct) params.set("account_id", acct);
-    if (subcat) params.set("subcategory_id", subcat);
-
-    const res = await fetch(`/api/expenses?${params}`);
-    if (res.ok) {
-      const data = await res.json();
-      cache.current.set(key, data.expenses);
-      // Only update UI if we're still on the same key
-      if (
-        `${month}|${filterCategory}|${filterAccount}|${filterSubcategory}` ===
-        key
-      ) {
-        setExpenses(data.expenses);
-      }
-    }
-    if (!silent) setLoading(false);
-  };
 
   useEffect(() => {
     fetchExpenses();
