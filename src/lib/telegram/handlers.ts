@@ -816,99 +816,139 @@ export function registerHandlers(bot: Bot<AppContext>) {
     const userProfile = ctx.userProfile;
     if (!userProfile) return;
     const userId = userProfile.id;
+    const householdId = userProfile.household_id;
 
-    const account = await getUserPrimaryAccount(
-      userId,
-      userProfile.household_id,
-    );
+    const account = await getUserPrimaryAccount(userId, householdId);
     if (!account) {
       return ctx.reply("No account found. Set up on the web app first.");
     }
 
-    await ctx.reply("🎙 Transcribing...");
+    // Send the placeholder synchronously so the user sees an instant ack and
+    // we capture the message_id to edit later.
+    const placeholder = await ctx.reply("🎙 Transcribing...");
+    const chatId = placeholder.chat.id;
+    const messageId = placeholder.message_id;
+    const fromId = ctx.from.id;
+    const fileId = ctx.message.voice.file_id;
 
-    try {
-      const file = await ctx.getFile();
-      const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-      const response = await fetch(fileUrl);
-      const buffer = Buffer.from(await response.arrayBuffer());
-
-      const { transcribe } = await import("@/lib/ai/groq");
-      const transcript = await transcribe(buffer);
-
-      if (!transcript) {
-        return ctx.reply("Couldn't understand the audio. Try typing instead.");
-      }
-
-      const subcategories = await getUserSubcategories(
-        userId,
-        userProfile.household_id,
-      );
-      const result = await parseVoiceExpense(transcript, subcategories);
-      if (isParseError(result)) {
-        return ctx.reply(
-          `I heard: "${transcript}"\n\nBut couldn't identify an expense or income.`,
-        );
-      }
-
-      const pendingId = nanoid(8);
-      const today = new Date().toISOString().split("T")[0];
-
-      let item: PendingItem;
-      if (isParsedIncome(result)) {
-        item = {
-          type: "income",
-          amount: result.amount,
-          source_label: result.source_label,
-          note: result.note,
-          income_date: today,
-          source: "voice",
-          userId,
-          accountId: account.id,
-        };
-      } else {
-        let merchant = result.merchant;
-        let originalMerchant: string | null = null;
-        if (merchant) {
-          const knownMerchants = await getKnownMerchants(
-            userProfile.household_id,
+    // Heavy AI work runs after the webhook response is flushed so Telegram
+    // gets a 200 in <500ms and the next update for this chat isn't delayed.
+    after(async () => {
+      try {
+        const work = (async () => {
+          const file = await ctx.api.getFile(fileId);
+          const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+          const buffer = Buffer.from(
+            await (await fetch(fileUrl)).arrayBuffer(),
           );
-          const normalized = await normalizeMerchant(merchant, knownMerchants);
-          if (normalized.wasNormalized) {
-            originalMerchant = merchant;
-            merchant = normalized.canonical;
-            await storeMerchantAlias(
-              originalMerchant,
-              normalized.canonical,
-              userProfile.household_id,
+
+          const { transcribe } = await import("@/lib/ai/groq");
+          const transcript = await transcribe(buffer);
+
+          if (!transcript) {
+            await ctx.api.editMessageText(
+              chatId,
+              messageId,
+              "Couldn't understand the audio. Try typing instead.",
             );
+            return;
           }
+
+          const subcategories = await getUserSubcategories(userId, householdId);
+          const result = await parseVoiceExpense(transcript, subcategories);
+          if (isParseError(result)) {
+            await ctx.api.editMessageText(
+              chatId,
+              messageId,
+              `I heard: "${transcript}"\n\nBut couldn't identify an expense or income.`,
+            );
+            return;
+          }
+
+          const pendingId = nanoid(8);
+          const today = new Date().toISOString().split("T")[0];
+
+          let item: PendingItem;
+          if (isParsedIncome(result)) {
+            item = {
+              type: "income",
+              amount: result.amount,
+              source_label: result.source_label,
+              note: result.note,
+              income_date: today,
+              source: "voice",
+              userId,
+              accountId: account.id,
+            };
+          } else {
+            let merchant = result.merchant;
+            let originalMerchant: string | null = null;
+            if (merchant) {
+              const knownMerchants = await getKnownMerchants(householdId);
+              const normalized = await normalizeMerchant(
+                merchant,
+                knownMerchants,
+              );
+              if (normalized.wasNormalized) {
+                originalMerchant = merchant;
+                merchant = normalized.canonical;
+                await storeMerchantAlias(
+                  originalMerchant,
+                  normalized.canonical,
+                  householdId,
+                );
+              }
+            }
+
+            item = {
+              type: "expense",
+              amount: result.amount,
+              category: result.category,
+              subcategory: result.subcategory,
+              merchant,
+              originalMerchant,
+              note: result.note,
+              expense_date: result.date || today,
+              source: "voice",
+              transcript,
+              userId,
+              accountId: account.id,
+            };
+          }
+
+          await createPending(pendingId, fromId, item);
+          await ctx.api.editMessageText(
+            chatId,
+            messageId,
+            formatConfirmation(item),
+            { reply_markup: confirmationKeyboard(pendingId) },
+          );
+        })();
+
+        // 25s budget — leave 5s headroom under maxDuration=30. Without this
+        // the placeholder could be left as "Transcribing..." indefinitely
+        // when Gemini stalls past the function timeout.
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("voice processing timeout")),
+            25_000,
+          ),
+        );
+        await Promise.race([work, timeout]);
+      } catch (err) {
+        console.error("voice processing in after() failed", err);
+        try {
+          await ctx.api.editMessageText(
+            chatId,
+            messageId,
+            "Took too long. Try typing instead.",
+          );
+        } catch {
+          // editMessageText itself can fail (user blocked bot, message gone) —
+          // nothing useful to do at this point.
         }
-
-        item = {
-          type: "expense",
-          amount: result.amount,
-          category: result.category,
-          subcategory: result.subcategory,
-          merchant,
-          originalMerchant,
-          note: result.note,
-          expense_date: result.date || today,
-          source: "voice",
-          transcript,
-          userId,
-          accountId: account.id,
-        };
       }
-
-      await createPending(pendingId, ctx.from.id, item);
-      return ctx.reply(formatConfirmation(item), {
-        reply_markup: confirmationKeyboard(pendingId),
-      });
-    } catch (error) {
-      console.error("Voice processing error:", error);
-      return ctx.reply("Something went wrong. Try typing instead.");
-    }
+    });
   });
 
   // Photo message handler (receipt)
@@ -925,48 +965,78 @@ export function registerHandlers(bot: Bot<AppContext>) {
       return ctx.reply("No account found. Set up on the web app first.");
     }
 
-    await ctx.reply("📸 Reading receipt...");
+    const placeholder = await ctx.reply("📸 Reading receipt...");
+    const chatId = placeholder.chat.id;
+    const messageId = placeholder.message_id;
+    const fromId = ctx.from.id;
+    const photos = ctx.message.photo;
+    const photoFileId = photos[photos.length - 1].file_id;
 
-    try {
-      const photos = ctx.message.photo;
-      const photo = photos[photos.length - 1];
-      const file = await ctx.api.getFile(photo.file_id);
-      const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-      const response = await fetch(fileUrl);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const base64 = buffer.toString("base64");
+    after(async () => {
+      try {
+        const work = (async () => {
+          const file = await ctx.api.getFile(photoFileId);
+          const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+          const buffer = Buffer.from(
+            await (await fetch(fileUrl)).arrayBuffer(),
+          );
+          const base64 = buffer.toString("base64");
 
-      const result = await parseReceiptImage(base64, "image/jpeg");
-      if (isParseError(result) || isParsedIncome(result)) {
-        return ctx.reply(
-          "Couldn't read this as a receipt. Try typing instead.",
+          const result = await parseReceiptImage(base64, "image/jpeg");
+          if (isParseError(result) || isParsedIncome(result)) {
+            await ctx.api.editMessageText(
+              chatId,
+              messageId,
+              "Couldn't read this as a receipt. Try typing instead.",
+            );
+            return;
+          }
+
+          const pendingId = nanoid(8);
+          const item: PendingItem = {
+            type: "expense",
+            amount: result.amount,
+            category: result.category,
+            subcategory: result.subcategory,
+            merchant: result.merchant,
+            originalMerchant: null,
+            note: result.note,
+            expense_date: result.date || new Date().toISOString().split("T")[0],
+            source: "receipt",
+            transcript: `Amount: ${result.amount}, Merchant: ${result.merchant || "unknown"}`,
+            userId,
+            accountId: account.id,
+          };
+
+          await createPending(pendingId, fromId, item);
+          await ctx.api.editMessageText(
+            chatId,
+            messageId,
+            formatConfirmation(item),
+            { reply_markup: confirmationKeyboard(pendingId) },
+          );
+        })();
+
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("receipt processing timeout")),
+            25_000,
+          ),
         );
+        await Promise.race([work, timeout]);
+      } catch (err) {
+        console.error("receipt processing in after() failed", err);
+        try {
+          await ctx.api.editMessageText(
+            chatId,
+            messageId,
+            "Took too long. Try typing instead.",
+          );
+        } catch {
+          // editMessageText itself failed — nothing more we can do.
+        }
       }
-
-      const pendingId = nanoid(8);
-      const item: PendingItem = {
-        type: "expense",
-        amount: result.amount,
-        category: result.category,
-        subcategory: result.subcategory,
-        merchant: result.merchant,
-        originalMerchant: null,
-        note: result.note,
-        expense_date: result.date || new Date().toISOString().split("T")[0],
-        source: "receipt",
-        transcript: `Amount: ${result.amount}, Merchant: ${result.merchant || "unknown"}`,
-        userId,
-        accountId: account.id,
-      };
-
-      await createPending(pendingId, ctx.from.id, item);
-      return ctx.reply(formatConfirmation(item), {
-        reply_markup: confirmationKeyboard(pendingId),
-      });
-    } catch (error) {
-      console.error("Receipt processing error:", error);
-      return ctx.reply("Something went wrong. Try typing instead.");
-    }
+    });
   });
 
   bot.on("message:document", async (ctx) => {
