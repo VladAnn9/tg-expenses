@@ -636,6 +636,19 @@ export type Database = {
         Args: { p_date: string; p_user_id: string };
         Returns: number;
       };
+      get_frequent_subcategories: {
+        Args: {
+          p_household_id: string;
+          p_limit?: number;
+          p_parent_category: Database["public"]["Enums"]["expense_category"];
+          p_user_id: string;
+        };
+        Returns: {
+          expense_count: number;
+          id: string;
+          name: string;
+        }[];
+      };
       is_household_member: {
         Args: { target_user_id: string };
         Returns: boolean;

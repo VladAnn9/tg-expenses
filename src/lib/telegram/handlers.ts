@@ -94,34 +94,17 @@ async function getFrequentSubcategories(
   householdId: string | null,
 ): Promise<Array<{ id: string; name: string }>> {
   const supabase = createAdminClient();
-  const query = householdId
-    ? supabase
-        .from("subcategories")
-        .select("id, name")
-        .eq("parent_category", parentCategory)
-        .eq("household_id", householdId)
-    : supabase
-        .from("subcategories")
-        .select("id, name")
-        .eq("parent_category", parentCategory)
-        .eq("created_by", userId);
-  const { data: subs } = await query;
-  if (!subs || subs.length === 0) return [];
-
-  const withCounts = await Promise.all(
-    subs.map(async (sub) => {
-      const { count } = await supabase
-        .from("expenses")
-        .select("id", { count: "exact", head: true })
-        .eq("subcategory_id", sub.id);
-      return { id: sub.id, name: sub.name, count: count ?? 0 };
-    }),
-  );
-  return withCounts
-    .filter((s) => s.count > 0)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5)
-    .map(({ id, name }) => ({ id, name }));
+  const { data, error } = await supabase.rpc("get_frequent_subcategories", {
+    p_parent_category: parentCategory,
+    p_user_id: userId,
+    p_household_id: householdId as string,
+    p_limit: 5,
+  });
+  if (error) {
+    console.error("get_frequent_subcategories rpc failed", error);
+    return [];
+  }
+  return (data ?? []).map((r) => ({ id: r.id, name: r.name }));
 }
 
 async function findExistingSubcategory(
