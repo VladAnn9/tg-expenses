@@ -24,6 +24,7 @@ import {
   createUndo,
   getUndo,
   deleteUndo,
+  tryRecordUpdate,
   type PendingItem,
 } from "./pending-store";
 
@@ -320,6 +321,23 @@ export function registerHandlers(bot: Bot) {
     return ctx.reply(
       '✅ Account linked! You can now send expenses here.\n\nTry: "15 coffee" or send a voice memo.',
     );
+  });
+
+  // Update-id dedup — must run before any side-effectful middleware so
+  // Telegram retries (slow handlers, network blips, function timeouts) can't
+  // double-process. Pre-check rather than post-success: if the function
+  // crashes mid-handler, the update is recorded as processed; the next retry
+  // would also be hopeless, so the user re-sends. Standard at-most-once.
+  bot.use(async (ctx, next) => {
+    const fresh = await tryRecordUpdate(
+      ctx.update.update_id,
+      ctx.chat?.id ?? null,
+    );
+    if (!fresh) {
+      console.warn(`[bot] duplicate update ${ctx.update.update_id}, skipping`);
+      return;
+    }
+    return next();
   });
 
   // Handle unlinked users for all message types

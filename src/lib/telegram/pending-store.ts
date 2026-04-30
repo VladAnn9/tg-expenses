@@ -151,3 +151,23 @@ export async function deleteUndo(id: string): Promise<void> {
   const supabase = createAdminClient();
   await supabase.from("telegram_undo_intents").delete().eq("id", id);
 }
+
+// ---- Update-id dedup ----
+
+// Returns true if the update_id was newly recorded; false if it was already
+// processed (Telegram retry). Transient DB errors fall through to true so the
+// caller processes the update — silently dropping legitimate updates on a
+// Supabase blip is worse than the rare retry double-write.
+export async function tryRecordUpdate(
+  updateId: number,
+  chatId: number | null
+): Promise<boolean> {
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from("telegram_processed_updates")
+    .insert({ update_id: updateId, chat_id: chatId });
+  if (!error) return true;
+  if (error.code === "23505") return false;
+  console.error("[bot] dedup insert failed, processing anyway", error);
+  return true;
+}

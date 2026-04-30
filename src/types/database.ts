@@ -574,6 +574,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      telegram_processed_updates: {
+        Row: {
+          chat_id: number | null;
+          expires_at: string;
+          processed_at: string;
+          update_id: number;
+        };
+        Insert: {
+          chat_id?: number | null;
+          expires_at?: string;
+          processed_at?: string;
+          update_id: number;
+        };
+        Update: {
+          chat_id?: number | null;
+          expires_at?: string;
+          processed_at?: string;
+          update_id?: number;
+        };
+        Relationships: [];
+      };
       telegram_undo_intents: {
         Row: {
           created_at: string;
