@@ -5,9 +5,10 @@ export type ExpenseCategory =
   | "Bills"
   | "Transport"
   | "Travel"
+  | "Sport"
   | "Shopping"
-  | "Entertainment"
   | "Health"
+  | "Entertainment"
   | "Other";
 
 export type ExpenseSource = "voice" | "receipt" | "text" | "web" | "import";

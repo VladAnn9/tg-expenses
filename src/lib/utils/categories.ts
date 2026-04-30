@@ -7,9 +7,10 @@ export const CATEGORIES: ExpenseCategory[] = [
   "Bills",
   "Transport",
   "Travel",
+  "Sport",
   "Shopping",
-  "Entertainment",
   "Health",
+  "Entertainment",
   "Other",
 ];
 
@@ -20,9 +21,10 @@ export const CATEGORY_EMOJI: Record<ExpenseCategory, string> = {
   Bills: "📄",
   Transport: "🚗",
   Travel: "✈️",
+  Sport: "🏃",
   Shopping: "🛍️",
-  Entertainment: "🎬",
   Health: "💊",
+  Entertainment: "🎬",
   Other: "📦",
 };
 

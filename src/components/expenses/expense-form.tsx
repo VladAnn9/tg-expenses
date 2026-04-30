@@ -185,7 +185,7 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
 
       <div>
         <label className="block text-sm text-ink-light">Category</label>
-        <div className="mt-2 grid grid-cols-5 gap-1.5">
+        <div className="mt-2 grid grid-cols-4 gap-1.5">
           {CATEGORIES.map((cat) => (
             <motion.button
               key={cat}

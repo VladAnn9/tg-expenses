@@ -1,9 +1,11 @@
 export const TEXT_EXPENSE_PROMPT = `You are an expense/income parser. Extract details from the user's message.
 The user may write in English, Polish, or Russian.
 
-Categories (pick exactly one for expenses): Food, Dining, Housing, Bills, Transport, Travel, Shopping, Entertainment, Health, Other
+Categories (pick exactly one for expenses): Food, Dining, Housing, Bills, Transport, Travel, Sport, Shopping, Entertainment, Health, Other
 
 Use Travel for trip-related spending (flights, hotels, AirBnB, trains/buses between cities, travel insurance, tourist activities, baggage fees). Use Transport for everyday local commuting (Uber, taxi, metro, fuel, parking) when not part of a trip.
+
+Use Sport for fitness and active-lifestyle spending (gym memberships, fitness classes like yoga/pilates/spin/crossfit, sports gear/equipment, race entry fees, sports facility bookings, ski passes). Use Health for medical spending (doctors, pharmacy, supplements, therapy). Use Shopping for non-sport apparel and general gear.
 
 Additionally, suggest a subcategory. The user has these existing subcategories:
 {user_subcategories}
@@ -28,6 +30,8 @@ Examples:
 "Uber 25 PLN" → {"type": "expense", "amount": 25, "category": "Transport", "subcategory": "Rideshare", "merchant": "Uber", "note": null}
 "Flight to Paris 450" → {"type": "expense", "amount": 450, "category": "Travel", "subcategory": "Flights", "merchant": null, "note": "Paris"}
 "Hotel in Berlin 320" → {"type": "expense", "amount": 320, "category": "Travel", "subcategory": "Hotels", "merchant": null, "note": "Berlin"}
+"Gym membership 120" → {"type": "expense", "amount": 120, "category": "Sport", "subcategory": "Gym", "merchant": null, "note": null}
+"Yoga class 60 PLN" → {"type": "expense", "amount": 60, "category": "Sport", "subcategory": "Classes", "merchant": null, "note": "yoga"}
 "Rent 3100" → {"type": "expense", "amount": 3100, "category": "Housing", "subcategory": "Rent", "merchant": null, "note": null}
 "Salary 8000" → {"type": "income", "amount": 8000, "source_label": "Salary", "note": null}
 "hello" → {"error": "not_an_expense"}
@@ -37,9 +41,11 @@ Respond with ONLY the JSON object, no markdown or explanation.`;
 export const VOICE_EXPENSE_PROMPT = `You are an expense/income parser. The following text was transcribed from a voice memo.
 Extract details from it. The user may speak in English, Polish, or Russian.
 
-Categories (pick exactly one for expenses): Food, Dining, Housing, Bills, Transport, Travel, Shopping, Entertainment, Health, Other
+Categories (pick exactly one for expenses): Food, Dining, Housing, Bills, Transport, Travel, Sport, Shopping, Entertainment, Health, Other
 
 Use Travel for trip-related spending (flights, hotels, AirBnB, trains/buses between cities, travel insurance, tourist activities, baggage fees). Use Transport for everyday local commuting (Uber, taxi, metro, fuel, parking) when not part of a trip.
+
+Use Sport for fitness and active-lifestyle spending (gym memberships, fitness classes like yoga/pilates/spin/crossfit, sports gear/equipment, race entry fees, sports facility bookings, ski passes). Use Health for medical spending (doctors, pharmacy, supplements, therapy). Use Shopping for non-sport apparel and general gear.
 
 Additionally, suggest a subcategory. The user has these existing subcategories:
 {user_subcategories}
@@ -63,7 +69,7 @@ export const RECEIPT_PARSING_PROMPT = `You are a receipt parser. Analyze this re
 - amount: number (the total/final amount, must be positive)
 - merchant: string (the store/business name)
 - date: string in YYYY-MM-DD format (the receipt date)
-- category: string (one of: Food, Dining, Housing, Bills, Transport, Travel, Shopping, Entertainment, Health, Other — use Travel for hotels/airlines/trip-related receipts)
+- category: string (one of: Food, Dining, Housing, Bills, Transport, Travel, Sport, Shopping, Entertainment, Health, Other — use Travel for hotels/airlines/trip-related receipts; use Sport for gyms, fitness studios, sportswear/equipment retailers like Decathlon, and race-fee receipts)
 - subcategory: string or null (suggest based on items)
 - items: string (brief summary of main items, for the note field)
 

@@ -57,6 +57,14 @@ const ROUNDS: Round[] = [
     amount: 450.0,
     monthlyTotal: 1280,
   },
+  {
+    voice: "one-twenty on the gym membership",
+    merchant: "Zdrofit",
+    category: "Sport",
+    emoji: "🏃",
+    amount: 120.0,
+    monthlyTotal: 540,
+  },
 ];
 
 const TIMELINE = {
