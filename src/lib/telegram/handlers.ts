@@ -1,4 +1,5 @@
 import { Bot, Context, InlineKeyboard } from "grammy";
+import { after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database, ExpenseCategory } from "@/types/database";
 import { CATEGORIES, CATEGORY_EMOJI } from "@/lib/utils/categories";
@@ -11,45 +12,23 @@ import {
   normalizeMerchant,
   generateRoast,
 } from "@/lib/ai/gemini";
-import type { ParsedExpense, ParsedIncome } from "@/lib/ai/gemini";
 import { nanoid } from "nanoid";
+import {
+  createPending,
+  getPending,
+  updatePending,
+  deletePending,
+  setAwaitingField,
+  findAwaitingByTelegramUser,
+  clearAwaiting,
+  createUndo,
+  getUndo,
+  deleteUndo,
+  type PendingItem,
+} from "./pending-store";
 
 type TelegramLinkRequest =
   Database["public"]["Tables"]["telegram_link_requests"]["Row"];
-
-// Pending expense store (in-memory, per-process)
-interface PendingExpense {
-  type: "expense";
-  amount: number;
-  category: ExpenseCategory;
-  subcategory: string | null;
-  merchant: string | null;
-  originalMerchant: string | null;
-  note: string | null;
-  expense_date: string;
-  source: "text" | "voice" | "receipt";
-  transcript: string | null;
-  userId: string;
-  accountId: string;
-}
-
-interface PendingIncome {
-  type: "income";
-  amount: number;
-  source_label: string | null;
-  note: string | null;
-  income_date: string;
-  source: "text" | "voice";
-  userId: string;
-  accountId: string;
-}
-
-type PendingItem = PendingExpense | PendingIncome;
-
-const pendingItems = new Map<string, PendingItem>();
-
-// Undo store: expenseId → { createdAt, userId }
-const undoStore = new Map<string, { expenseId: string; createdAt: number }>();
 
 // ---- Helpers ----
 
@@ -63,7 +42,10 @@ async function findUserByTelegramId(telegramId: number) {
   return data;
 }
 
-async function getUserPrimaryAccount(userId: string, householdId?: string | null) {
+async function getUserPrimaryAccount(
+  userId: string,
+  householdId?: string | null,
+) {
   const supabase = createAdminClient();
 
   // Household members share accounts — query by household, not user
@@ -89,10 +71,16 @@ async function getUserPrimaryAccount(userId: string, householdId?: string | null
   return fallback;
 }
 
-async function getUserSubcategories(userId: string, householdId?: string | null): Promise<string[]> {
+async function getUserSubcategories(
+  userId: string,
+  householdId?: string | null,
+): Promise<string[]> {
   const supabase = createAdminClient();
   const query = householdId
-    ? supabase.from("subcategories").select("name").eq("household_id", householdId)
+    ? supabase
+        .from("subcategories")
+        .select("name")
+        .eq("household_id", householdId)
     : supabase.from("subcategories").select("name").eq("created_by", userId);
   const { data } = await query;
   return (data ?? []).map((s) => s.name);
@@ -101,12 +89,20 @@ async function getUserSubcategories(userId: string, householdId?: string | null)
 async function getFrequentSubcategories(
   parentCategory: ExpenseCategory,
   userId: string,
-  householdId: string | null
+  householdId: string | null,
 ): Promise<Array<{ id: string; name: string }>> {
   const supabase = createAdminClient();
   const query = householdId
-    ? supabase.from("subcategories").select("id, name").eq("parent_category", parentCategory).eq("household_id", householdId)
-    : supabase.from("subcategories").select("id, name").eq("parent_category", parentCategory).eq("created_by", userId);
+    ? supabase
+        .from("subcategories")
+        .select("id, name")
+        .eq("parent_category", parentCategory)
+        .eq("household_id", householdId)
+    : supabase
+        .from("subcategories")
+        .select("id, name")
+        .eq("parent_category", parentCategory)
+        .eq("created_by", userId);
   const { data: subs } = await query;
   if (!subs || subs.length === 0) return [];
 
@@ -117,7 +113,7 @@ async function getFrequentSubcategories(
         .select("id", { count: "exact", head: true })
         .eq("subcategory_id", sub.id);
       return { id: sub.id, name: sub.name, count: count ?? 0 };
-    })
+    }),
   );
   return withCounts
     .filter((s) => s.count > 0)
@@ -130,17 +126,29 @@ async function findExistingSubcategory(
   name: string,
   parentCategory: ExpenseCategory,
   userId: string,
-  householdId: string | null
+  householdId: string | null,
 ): Promise<string | null> {
   const supabase = createAdminClient();
   const query = householdId
-    ? supabase.from("subcategories").select("name").eq("parent_category", parentCategory).eq("household_id", householdId).ilike("name", name)
-    : supabase.from("subcategories").select("name").eq("parent_category", parentCategory).eq("created_by", userId).ilike("name", name);
+    ? supabase
+        .from("subcategories")
+        .select("name")
+        .eq("parent_category", parentCategory)
+        .eq("household_id", householdId)
+        .ilike("name", name)
+    : supabase
+        .from("subcategories")
+        .select("name")
+        .eq("parent_category", parentCategory)
+        .eq("created_by", userId)
+        .ilike("name", name);
   const { data } = await query.limit(1).single();
   return data?.name ?? null;
 }
 
-async function getKnownMerchants(householdId: string | null): Promise<string[]> {
+async function getKnownMerchants(
+  householdId: string | null,
+): Promise<string[]> {
   const supabase = createAdminClient();
   if (householdId) {
     const { data } = await supabase
@@ -155,21 +163,27 @@ async function getKnownMerchants(householdId: string | null): Promise<string[]> 
 async function storeMerchantAlias(
   variant: string,
   canonical: string,
-  householdId: string | null
+  householdId: string | null,
 ) {
   if (variant.toLowerCase() === canonical.toLowerCase()) return;
   const supabase = createAdminClient();
-  await supabase.from("merchant_aliases").upsert(
-    { variant: variant.toLowerCase(), canonical_name: canonical, household_id: householdId },
-    { onConflict: "variant,household_id" }
-  );
+  await supabase
+    .from("merchant_aliases")
+    .upsert(
+      {
+        variant: variant.toLowerCase(),
+        canonical_name: canonical,
+        household_id: householdId,
+      },
+      { onConflict: "variant,household_id" },
+    );
 }
 
 async function ensureSubcategory(
   name: string,
   parentCategory: ExpenseCategory,
   userId: string,
-  householdId: string | null
+  householdId: string | null,
 ): Promise<string | null> {
   if (!name) return null;
   const supabase = createAdminClient();
@@ -241,11 +255,11 @@ export function registerHandlers(bot: Bot) {
             "• Typing: `15 coffee` or `Biedronka 87`\n" +
             "• Sending a 🎙 voice memo\n" +
             "• Sending a 📸 receipt photo",
-          { parse_mode: "Markdown" }
+          { parse_mode: "Markdown" },
         );
       }
       return ctx.reply(
-        "Welcome! Link your account first at the Zen Finance web app to start tracking expenses."
+        "Welcome! Link your account first at the Zen Finance web app to start tracking expenses.",
       );
     }
 
@@ -260,13 +274,13 @@ export function registerHandlers(bot: Bot) {
 
     if (!linkReq) {
       return ctx.reply(
-        "This link is invalid or has already been used. Generate a new one from the web app."
+        "This link is invalid or has already been used. Generate a new one from the web app.",
       );
     }
 
     if (new Date(linkReq.expires_at) < new Date()) {
       return ctx.reply(
-        "This link has expired. Generate a new one from the web app."
+        "This link has expired. Generate a new one from the web app.",
       );
     }
 
@@ -277,7 +291,7 @@ export function registerHandlers(bot: Bot) {
 
     if (updateError) {
       return ctx.reply(
-        "Something went wrong linking your account. Please try again."
+        "Something went wrong linking your account. Please try again.",
       );
     }
 
@@ -287,7 +301,7 @@ export function registerHandlers(bot: Bot) {
       .eq("id", linkReq.id);
 
     return ctx.reply(
-      '✅ Account linked! You can now send expenses here.\n\nTry: "15 coffee" or send a voice memo.'
+      '✅ Account linked! You can now send expenses here.\n\nTry: "15 coffee" or send a voice memo.',
     );
   });
 
@@ -300,7 +314,7 @@ export function registerHandlers(bot: Bot) {
     const user = await findUserByTelegramId(ctx.from.id);
     if (!user) {
       return ctx.reply(
-        'You need to link your Telegram account first.\n\nVisit the Zen Finance web app and click "Link Telegram" to get started.'
+        'You need to link your Telegram account first.\n\nVisit the Zen Finance web app and click "Link Telegram" to get started.',
       );
     }
 
@@ -315,29 +329,28 @@ export function registerHandlers(bot: Bot) {
 
     // ---- Undo handler ----
     if (action === "undo") {
-      const undoInfo = undoStore.get(pendingId);
+      const undoInfo = await getUndo(pendingId);
       if (!undoInfo) {
-        return ctx.answerCallbackQuery({ text: "Nothing to undo." });
+        return ctx.answerCallbackQuery({
+          text: "Nothing to undo or window expired.",
+        });
       }
-      const elapsed = Date.now() - undoInfo.createdAt;
-      if (elapsed > 30000) {
-        undoStore.delete(pendingId);
-        await ctx.answerCallbackQuery({ text: "Too late — 30s window has passed." });
-        return;
-      }
+      await ctx.answerCallbackQuery();
       const supabase = createAdminClient();
       await supabase.from("expenses").delete().eq("id", undoInfo.expenseId);
-      undoStore.delete(pendingId);
-      await ctx.answerCallbackQuery({ text: "Expense deleted!" });
+      await deleteUndo(pendingId);
       await ctx.editMessageText("↩️ Expense undone.");
       return;
     }
 
     if (action === "confirm") {
-      const pending = pendingItems.get(pendingId);
+      const pending = await getPending(pendingId);
       if (!pending) {
         return ctx.answerCallbackQuery({ text: "Expired. Send a new one." });
       }
+
+      // Ack immediately so the spinner clears, then do the heavy work.
+      await ctx.answerCallbackQuery();
 
       const supabase = createAdminClient();
 
@@ -351,28 +364,28 @@ export function registerHandlers(bot: Bot) {
           income_date: pending.income_date,
           created_by: pending.userId,
         });
-        pendingItems.delete(pendingId);
+        await deletePending(pendingId);
         if (error) {
-          await ctx.answerCallbackQuery({ text: "Failed to save." });
+          await ctx.editMessageText("⚠️ Couldn't save income — try again.");
           return;
         }
-        await ctx.answerCallbackQuery({ text: "Saved!" });
         await ctx.editMessageText(
-          `✅ Saved: 💰 ${pending.amount.toFixed(2)} PLN — ${pending.source_label || "Income"}`
+          `✅ Saved: 💰 ${pending.amount.toFixed(2)} PLN — ${pending.source_label || "Income"}`,
         );
         return;
       }
 
       // Expense path
+      const userProfile = await findUserByTelegramId(ctx.from!.id);
+
       // Ensure subcategory exists
       let subcategoryId: string | null = null;
       if (pending.subcategory) {
-        const userProfile = await findUserByTelegramId(ctx.from!.id);
         subcategoryId = await ensureSubcategory(
           pending.subcategory,
           pending.category,
           pending.userId,
-          userProfile?.household_id ?? null
+          userProfile?.household_id ?? null,
         );
       }
 
@@ -395,71 +408,88 @@ export function registerHandlers(bot: Bot) {
         .select("id")
         .single();
 
-      pendingItems.delete(pendingId);
+      await deletePending(pendingId);
 
       if (error || !savedExpense) {
-        await ctx.answerCallbackQuery({ text: "Failed to save. Try again." });
+        await ctx.editMessageText("⚠️ Couldn't save expense — try again.");
         return;
       }
 
-      await ctx.answerCallbackQuery({ text: "Saved!" });
-
-      // Build confirmation message
+      // Build confirmation message (without roast — roast is async)
       const subcat = pending.subcategory ? ` > ${pending.subcategory}` : "";
-      let confirmMsg = `✅ Saved: ${pending.amount.toFixed(2)} PLN — ${CATEGORY_EMOJI[pending.category]} ${pending.category}${subcat}${pending.merchant ? ` at ${pending.merchant}` : ""}`;
+      const confirmMsg = `✅ Saved: ${pending.amount.toFixed(2)} PLN — ${CATEGORY_EMOJI[pending.category]} ${pending.category}${subcat}${pending.merchant ? ` at ${pending.merchant}` : ""}`;
 
-      // Generate roast if enabled
-      const userProfile = await findUserByTelegramId(ctx.from!.id);
+      // Store undo intent
+      const undoId = nanoid(8);
+      await createUndo(undoId, savedExpense.id, ctx.from!.id);
+
+      const undoKeyboard = new InlineKeyboard().text(
+        "↩️ Undo (30s)",
+        `undo:${undoId}`,
+      );
+
+      // Show the saved confirmation immediately so the user can move on.
+      const chatId = ctx.chat!.id;
+      const messageId = ctx.callbackQuery.message!.message_id;
+      await ctx.editMessageText(confirmMsg, { reply_markup: undoKeyboard });
+
+      // Roast is best-effort and runs after the response is flushed —
+      // it must NOT block the user from sending the next expense.
       if (userProfile?.roast_enabled) {
-        // Get category spending context
-        const now = new Date();
-        const startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-        const { data: catExpenses } = await supabase
-          .from("expenses")
-          .select("amount")
-          .eq("created_by", pending.userId)
-          .eq("category", pending.category)
-          .gte("expense_date", startDate);
-        const monthTotal = (catExpenses ?? []).reduce((s, e) => s + Number(e.amount), 0);
-
-        const roast = await generateRoast({
+        const expensePayload = {
           amount: pending.amount,
           category: pending.category,
           subcategory: pending.subcategory,
           merchant: pending.merchant,
-          monthCategoryTotal: monthTotal,
-          avgCategory: monthTotal, // simplified for now
+          userId: pending.userId,
+        };
+        after(async () => {
+          try {
+            const now = new Date();
+            const startDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+            const supabaseAfter = createAdminClient();
+            const { data: catExpenses } = await supabaseAfter
+              .from("expenses")
+              .select("amount")
+              .eq("created_by", expensePayload.userId)
+              .eq("category", expensePayload.category)
+              .gte("expense_date", startDate);
+            const monthTotal = (catExpenses ?? []).reduce(
+              (s, e) => s + Number(e.amount),
+              0,
+            );
+            const roast = await generateRoast({
+              amount: expensePayload.amount,
+              category: expensePayload.category,
+              subcategory: expensePayload.subcategory,
+              merchant: expensePayload.merchant,
+              monthCategoryTotal: monthTotal,
+              avgCategory: monthTotal,
+            });
+            if (!roast) return;
+            await ctx.api.editMessageText(
+              chatId,
+              messageId,
+              `${confirmMsg}\n"${roast}"`,
+              { reply_markup: undoKeyboard },
+            );
+          } catch (err) {
+            console.error("roast generation failed", err);
+          }
         });
-        if (roast) {
-          confirmMsg += `\n"${roast}"`;
-        }
       }
-
-      // Store undo info
-      const undoId = nanoid(8);
-      undoStore.set(undoId, {
-        expenseId: savedExpense.id,
-        createdAt: Date.now(),
-      });
-
-      const undoKeyboard = new InlineKeyboard().text(
-        "↩️ Undo (30s)",
-        `undo:${undoId}`
-      );
-
-      await ctx.editMessageText(confirmMsg, { reply_markup: undoKeyboard });
       return;
     }
 
     if (action === "cancel") {
-      pendingItems.delete(pendingId);
-      await ctx.answerCallbackQuery({ text: "Cancelled" });
+      await ctx.answerCallbackQuery();
+      await deletePending(pendingId);
       await ctx.editMessageText("❌ Cancelled.");
       return;
     }
 
     if (action === "edit") {
-      const pending = pendingItems.get(pendingId);
+      const pending = await getPending(pendingId);
       if (!pending) {
         return ctx.answerCallbackQuery({ text: "Expired." });
       }
@@ -473,7 +503,9 @@ export function registerHandlers(bot: Bot) {
         .text("Merchant", `edit_merchant:${pendingId}`)
         .text("Note", `edit_note:${pendingId}`);
       if (pending.type === "expense") {
-        const subLabel = pending.subcategory ? `Subcategory (${pending.subcategory})` : "Subcategory";
+        const subLabel = pending.subcategory
+          ? `Subcategory (${pending.subcategory})`
+          : "Subcategory";
         keyboard.row().text(subLabel, `edit_sub:${pendingId}`);
       }
       keyboard.row().text("🔙 Back", `back:${pendingId}`);
@@ -485,7 +517,7 @@ export function registerHandlers(bot: Bot) {
     }
 
     if (action === "back") {
-      const pending = pendingItems.get(pendingId);
+      const pending = await getPending(pendingId);
       if (!pending) {
         return ctx.answerCallbackQuery({ text: "Expired." });
       }
@@ -503,7 +535,7 @@ export function registerHandlers(bot: Bot) {
         const cat = CATEGORIES[i];
         keyboard.text(
           `${CATEGORY_EMOJI[cat]} ${cat}`,
-          `set_category:${pendingId}:${cat}`
+          `set_category:${pendingId}:${cat}`,
         );
         if (i % 3 === 2) keyboard.row();
       }
@@ -515,16 +547,17 @@ export function registerHandlers(bot: Bot) {
 
     if (action === "set_category") {
       const [, pid, category] = data.split(":");
-      const pending = pendingItems.get(pid);
+      const pending = await getPending(pid);
       if (!pending || pending.type !== "expense") {
         return ctx.answerCallbackQuery({ text: "Expired." });
       }
+      await ctx.answerCallbackQuery();
       const oldCategory = pending.category;
       pending.category = category as ExpenseCategory;
       if (oldCategory !== category) {
         pending.subcategory = null;
       }
-      await ctx.answerCallbackQuery({ text: `Category: ${category}` });
+      await updatePending(pid, pending);
       await ctx.editMessageText(formatConfirmation(pending), {
         reply_markup: confirmationKeyboard(pid),
       });
@@ -533,7 +566,7 @@ export function registerHandlers(bot: Bot) {
 
     // Subcategory picker
     if (action === "edit_sub") {
-      const pending = pendingItems.get(pendingId);
+      const pending = await getPending(pendingId);
       if (!pending || pending.type !== "expense") {
         return ctx.answerCallbackQuery({ text: "Expired." });
       }
@@ -542,11 +575,14 @@ export function registerHandlers(bot: Bot) {
       const frequent = await getFrequentSubcategories(
         pending.category,
         pending.userId,
-        userProfile?.household_id ?? null
+        userProfile?.household_id ?? null,
       );
       const keyboard = new InlineKeyboard();
       for (let i = 0; i < frequent.length; i++) {
-        keyboard.text(frequent[i].name, `set_sub:${pendingId}:${frequent[i].id}`);
+        keyboard.text(
+          frequent[i].name,
+          `set_sub:${pendingId}:${frequent[i].id}`,
+        );
         if (i % 2 === 1) keyboard.row();
       }
       if (frequent.length % 2 === 1) keyboard.row();
@@ -563,10 +599,11 @@ export function registerHandlers(bot: Bot) {
 
     if (action === "set_sub") {
       const [, pid, subId] = data.split(":");
-      const pending = pendingItems.get(pid);
+      const pending = await getPending(pid);
       if (!pending || pending.type !== "expense") {
         return ctx.answerCallbackQuery({ text: "Expired." });
       }
+      await ctx.answerCallbackQuery();
       if (subId === "none") {
         pending.subcategory = null;
       } else {
@@ -578,7 +615,7 @@ export function registerHandlers(bot: Bot) {
           .single();
         pending.subcategory = sub?.name ?? null;
       }
-      await ctx.answerCallbackQuery({ text: pending.subcategory ? `Subcategory: ${pending.subcategory}` : "Subcategory cleared" });
+      await updatePending(pid, pending);
       await ctx.editMessageText(formatConfirmation(pending), {
         reply_markup: confirmationKeyboard(pid),
       });
@@ -586,12 +623,12 @@ export function registerHandlers(bot: Bot) {
     }
 
     if (action === "sub_custom") {
-      const pending = pendingItems.get(pendingId);
+      const pending = await getPending(pendingId);
       if (!pending) {
         return ctx.answerCallbackQuery({ text: "Expired." });
       }
-      editStates.set(ctx.from!.id, { pendingId, field: "subcategory" });
       await ctx.answerCallbackQuery();
+      await setAwaitingField(pendingId, "subcategory");
       await ctx.editMessageText("Type the subcategory name:");
       return;
     }
@@ -604,15 +641,14 @@ export function registerHandlers(bot: Bot) {
       action === "edit_date"
     ) {
       const field = action.replace("edit_", "");
-      const pending = pendingItems.get(pendingId);
+      const pending = await getPending(pendingId);
       if (!pending) {
         return ctx.answerCallbackQuery({ text: "Expired." });
       }
-      editStates.set(ctx.from!.id, { pendingId, field });
-
       await ctx.answerCallbackQuery();
+      await setAwaitingField(pendingId, field);
       await ctx.editMessageText(
-        `Type the new ${field}:${field === "amount" ? " (number)" : field === "date" ? " (YYYY-MM-DD)" : ""}`
+        `Type the new ${field}:${field === "amount" ? " (number)" : field === "date" ? " (YYYY-MM-DD)" : ""}`,
       );
       return;
     }
@@ -620,26 +656,24 @@ export function registerHandlers(bot: Bot) {
     await ctx.answerCallbackQuery();
   });
 
-  // Handle text replies for field editing
-  const editStates = new Map<number, { pendingId: string; field: string }>();
-
   // Text message handler
   bot.on("message:text", async (ctx) => {
-    const userProfile = (ctx as Context & { userProfile?: { id: string; household_id: string | null; roast_enabled: boolean } }).userProfile;
+    const userProfile = (
+      ctx as Context & {
+        userProfile?: {
+          id: string;
+          household_id: string | null;
+          roast_enabled: boolean;
+        };
+      }
+    ).userProfile;
     if (!userProfile) return;
     const userId = userProfile.id;
 
     // Check if this is a reply to an edit prompt
-    const editState = editStates.get(ctx.from.id);
+    const editState = await findAwaitingByTelegramUser(ctx.from.id);
     if (editState) {
-      const pending = pendingItems.get(editState.pendingId);
-      editStates.delete(ctx.from.id);
-
-      if (!pending) {
-        return ctx.reply("That entry has expired. Send a new one.");
-      }
-
-      const { field, pendingId } = editState;
+      const { id: pendingId, field, payload: pending } = editState;
       const value = ctx.message.text.trim();
 
       if (field === "amount") {
@@ -666,10 +700,13 @@ export function registerHandlers(bot: Bot) {
           value,
           pending.category,
           pending.userId,
-          userProfile.household_id ?? null
+          userProfile.household_id ?? null,
         );
         pending.subcategory = existing ?? value;
       }
+
+      await updatePending(pendingId, pending);
+      await clearAwaiting(pendingId);
 
       return ctx.reply(formatConfirmation(pending), {
         reply_markup: confirmationKeyboard(pendingId),
@@ -677,26 +714,33 @@ export function registerHandlers(bot: Bot) {
     }
 
     // AI text parsing
-    const account = await getUserPrimaryAccount(userId, userProfile.household_id);
+    const account = await getUserPrimaryAccount(
+      userId,
+      userProfile.household_id,
+    );
     if (!account) {
       return ctx.reply(
-        "No account found. Please set up your account on the web app first."
+        "No account found. Please set up your account on the web app first.",
       );
     }
 
-    const subcategories = await getUserSubcategories(userId, userProfile.household_id);
+    const subcategories = await getUserSubcategories(
+      userId,
+      userProfile.household_id,
+    );
     const result = await parseTextExpense(ctx.message.text, subcategories);
     if (isParseError(result)) {
       return ctx.reply(
-        'I couldn\'t parse that.\n\nTry:\n• "15 coffee"\n• "Groceries 120 at Biedronka"\n• "Salary 8000"'
+        'I couldn\'t parse that.\n\nTry:\n• "15 coffee"\n• "Groceries 120 at Biedronka"\n• "Salary 8000"',
       );
     }
 
     const pendingId = nanoid(8);
     const today = new Date().toISOString().split("T")[0];
 
+    let item: PendingItem;
     if (isParsedIncome(result)) {
-      pendingItems.set(pendingId, {
+      item = {
         type: "income",
         amount: result.amount,
         source_label: result.source_label,
@@ -705,13 +749,15 @@ export function registerHandlers(bot: Bot) {
         source: "text",
         userId,
         accountId: account.id,
-      });
+      };
     } else {
       // Merchant normalization
       let merchant = result.merchant;
       let originalMerchant: string | null = null;
       if (merchant) {
-        const knownMerchants = await getKnownMerchants(userProfile.household_id);
+        const knownMerchants = await getKnownMerchants(
+          userProfile.household_id,
+        );
         const normalized = await normalizeMerchant(merchant, knownMerchants);
         if (normalized.wasNormalized) {
           originalMerchant = merchant;
@@ -719,12 +765,12 @@ export function registerHandlers(bot: Bot) {
           await storeMerchantAlias(
             originalMerchant,
             normalized.canonical,
-            userProfile.household_id
+            userProfile.household_id,
           );
         }
       }
 
-      pendingItems.set(pendingId, {
+      item = {
         type: "expense",
         amount: result.amount,
         category: result.category,
@@ -737,21 +783,33 @@ export function registerHandlers(bot: Bot) {
         transcript: ctx.message.text,
         userId,
         accountId: account.id,
-      });
+      };
     }
 
-    return ctx.reply(formatConfirmation(pendingItems.get(pendingId)!), {
+    await createPending(pendingId, ctx.from.id, item);
+    return ctx.reply(formatConfirmation(item), {
       reply_markup: confirmationKeyboard(pendingId),
     });
   });
 
   // Voice message handler
   bot.on("message:voice", async (ctx) => {
-    const userProfile = (ctx as Context & { userProfile?: { id: string; household_id: string | null; roast_enabled: boolean } }).userProfile;
+    const userProfile = (
+      ctx as Context & {
+        userProfile?: {
+          id: string;
+          household_id: string | null;
+          roast_enabled: boolean;
+        };
+      }
+    ).userProfile;
     if (!userProfile) return;
     const userId = userProfile.id;
 
-    const account = await getUserPrimaryAccount(userId, userProfile.household_id);
+    const account = await getUserPrimaryAccount(
+      userId,
+      userProfile.household_id,
+    );
     if (!account) {
       return ctx.reply("No account found. Set up on the web app first.");
     }
@@ -771,19 +829,23 @@ export function registerHandlers(bot: Bot) {
         return ctx.reply("Couldn't understand the audio. Try typing instead.");
       }
 
-      const subcategories = await getUserSubcategories(userId, userProfile.household_id);
+      const subcategories = await getUserSubcategories(
+        userId,
+        userProfile.household_id,
+      );
       const result = await parseVoiceExpense(transcript, subcategories);
       if (isParseError(result)) {
         return ctx.reply(
-          `I heard: "${transcript}"\n\nBut couldn't identify an expense or income.`
+          `I heard: "${transcript}"\n\nBut couldn't identify an expense or income.`,
         );
       }
 
       const pendingId = nanoid(8);
       const today = new Date().toISOString().split("T")[0];
 
+      let item: PendingItem;
       if (isParsedIncome(result)) {
-        pendingItems.set(pendingId, {
+        item = {
           type: "income",
           amount: result.amount,
           source_label: result.source_label,
@@ -792,21 +854,27 @@ export function registerHandlers(bot: Bot) {
           source: "voice",
           userId,
           accountId: account.id,
-        });
+        };
       } else {
         let merchant = result.merchant;
         let originalMerchant: string | null = null;
         if (merchant) {
-          const knownMerchants = await getKnownMerchants(userProfile.household_id);
+          const knownMerchants = await getKnownMerchants(
+            userProfile.household_id,
+          );
           const normalized = await normalizeMerchant(merchant, knownMerchants);
           if (normalized.wasNormalized) {
             originalMerchant = merchant;
             merchant = normalized.canonical;
-            await storeMerchantAlias(originalMerchant, normalized.canonical, userProfile.household_id);
+            await storeMerchantAlias(
+              originalMerchant,
+              normalized.canonical,
+              userProfile.household_id,
+            );
           }
         }
 
-        pendingItems.set(pendingId, {
+        item = {
           type: "expense",
           amount: result.amount,
           category: result.category,
@@ -819,10 +887,11 @@ export function registerHandlers(bot: Bot) {
           transcript,
           userId,
           accountId: account.id,
-        });
+        };
       }
 
-      return ctx.reply(formatConfirmation(pendingItems.get(pendingId)!), {
+      await createPending(pendingId, ctx.from.id, item);
+      return ctx.reply(formatConfirmation(item), {
         reply_markup: confirmationKeyboard(pendingId),
       });
     } catch (error) {
@@ -833,11 +902,22 @@ export function registerHandlers(bot: Bot) {
 
   // Photo message handler (receipt)
   bot.on("message:photo", async (ctx) => {
-    const userProfile = (ctx as Context & { userProfile?: { id: string; household_id: string | null; roast_enabled: boolean } }).userProfile;
+    const userProfile = (
+      ctx as Context & {
+        userProfile?: {
+          id: string;
+          household_id: string | null;
+          roast_enabled: boolean;
+        };
+      }
+    ).userProfile;
     if (!userProfile) return;
     const userId = userProfile.id;
 
-    const account = await getUserPrimaryAccount(userId, userProfile.household_id);
+    const account = await getUserPrimaryAccount(
+      userId,
+      userProfile.household_id,
+    );
     if (!account) {
       return ctx.reply("No account found. Set up on the web app first.");
     }
@@ -855,11 +935,13 @@ export function registerHandlers(bot: Bot) {
 
       const result = await parseReceiptImage(base64, "image/jpeg");
       if (isParseError(result) || isParsedIncome(result)) {
-        return ctx.reply("Couldn't read this as a receipt. Try typing instead.");
+        return ctx.reply(
+          "Couldn't read this as a receipt. Try typing instead.",
+        );
       }
 
       const pendingId = nanoid(8);
-      pendingItems.set(pendingId, {
+      const item: PendingItem = {
         type: "expense",
         amount: result.amount,
         category: result.category,
@@ -872,9 +954,10 @@ export function registerHandlers(bot: Bot) {
         transcript: `Amount: ${result.amount}, Merchant: ${result.merchant || "unknown"}`,
         userId,
         accountId: account.id,
-      });
+      };
 
-      return ctx.reply(formatConfirmation(pendingItems.get(pendingId)!), {
+      await createPending(pendingId, ctx.from.id, item);
+      return ctx.reply(formatConfirmation(item), {
         reply_markup: confirmationKeyboard(pendingId),
       });
     } catch (error) {
@@ -887,12 +970,3 @@ export function registerHandlers(bot: Bot) {
     return ctx.reply("Only photo images are supported for receipts.");
   });
 }
-
-export {
-  pendingItems,
-  formatConfirmation,
-  confirmationKeyboard,
-  findUserByTelegramId,
-  getUserPrimaryAccount,
-};
-export type { PendingExpense, PendingIncome, PendingItem };

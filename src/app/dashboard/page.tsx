@@ -23,8 +23,21 @@ interface SummaryData {
   safe_to_spend: number | null;
   pace_projection: number;
   previous_month_total: number;
-  by_category: { category: string; total: number; count: number; percentage: number }[];
-  recent_expenses: { id: string; amount: number; category: string; merchant: string | null; expense_date: string; note: string | null; created_by?: string }[];
+  by_category: {
+    category: string;
+    total: number;
+    count: number;
+    percentage: number;
+  }[];
+  recent_expenses: {
+    id: string;
+    amount: number;
+    category: string;
+    merchant: string | null;
+    expense_date: string;
+    note: string | null;
+    created_by?: string;
+  }[];
   tempo: { date: string; total: number }[];
 }
 
@@ -199,83 +212,98 @@ export default function DashboardPage() {
         dragMomentum={false}
         onDragEnd={handleMonthSwipe}
       >
-      <AnimatedContent transitionKey={summary.month} className="space-y-8">
-        {/* Telegram CTA — current month only */}
-        {isCurrentMonth && !hasTelegram && (
-          <AnimatedSection delay={0}>
-            <div className="rounded-2xl border border-sand/50 bg-cream p-6 text-center shadow-sm">
-              <p className="font-display text-xl font-light">
-                Connect Telegram to start tracking
-              </p>
-              <p className="mt-2 text-sm text-ink-light">
-                Log expenses by voice, photo, or text — right from Telegram
-              </p>
-              <TelegramLink />
-            </div>
-          </AnimatedSection>
-        )}
-
-        {/* Spending Summary (income/expense/net) */}
-        <AnimatedSection delay={0.05}>
-          <SpendingSummary
-            total={summary.total}
-            month={summary.month}
-            incomeTotal={summary.income_total}
-            carryOver={summary.carry_over}
-            balance={summary.balance}
-          />
-        </AnimatedSection>
-
-        {/* Safe to Spend — current month only */}
-        {isCurrentMonth && (
-          <AnimatedSection delay={0.1}>
-            <SafeToSpend safeToSpend={summary.safe_to_spend} />
-          </AnimatedSection>
-        )}
-
-        {/* Weekly Tempo Sparkline — current month only */}
-        {isCurrentMonth && summary.tempo && summary.tempo.length > 0 && (
-          <AnimatedSection delay={0.15}>
-            <SpendingTempo data={summary.tempo} />
-          </AnimatedSection>
-        )}
-
-        {/* Category Chart */}
-        <AnimatedSection delay={0.2}>
-          <CategoryChart data={summary.by_category as Parameters<typeof CategoryChart>[0]["data"]} />
-        </AnimatedSection>
-
-        {/* MoM Comparison */}
-        {(isCurrentMonth ? summary.pace_projection > 0 : summary.total > 0) && (
-          <AnimatedSection delay={0.25}>
-            <MomComparison
-              paceProjection={isCurrentMonth ? summary.pace_projection : summary.total}
-              previousMonthTotal={summary.previous_month_total}
-            />
-          </AnimatedSection>
-        )}
-
-        {/* Insight Cards — current month only, loads independently */}
-        {isCurrentMonth && (
-          insights === null ? (
-            <AnimatedSection delay={0.3}>
-              <div className="space-y-2">
-                <div className="h-5 w-24 animate-pulse rounded bg-mist/50" />
-                <div className="h-16 animate-pulse rounded-xl bg-mist/50" />
+        <AnimatedContent transitionKey={summary.month} className="space-y-8">
+          {/* Telegram CTA — current month only */}
+          {isCurrentMonth && !hasTelegram && (
+            <AnimatedSection delay={0}>
+              <div className="rounded-2xl border border-sand/50 bg-cream p-6 text-center shadow-sm">
+                <p className="font-display text-xl font-light">
+                  Connect Telegram to start tracking
+                </p>
+                <p className="mt-2 text-sm text-ink-light">
+                  Log expenses by voice, photo, or text — right from Telegram
+                </p>
+                <TelegramLink />
               </div>
             </AnimatedSection>
-          ) : insights.length > 0 ? (
-            <AnimatedSection delay={0.3}>
-              <InsightsCards insights={insights} />
-            </AnimatedSection>
-          ) : null
-        )}
+          )}
 
-        {/* Recent Expenses */}
-        <AnimatedSection delay={0.35}>
-          <RecentExpenses expenses={summary.recent_expenses as Parameters<typeof RecentExpenses>[0]["expenses"]} />
-        </AnimatedSection>
-      </AnimatedContent>
+          {/* Spending Summary (income/expense/net) */}
+          <AnimatedSection delay={0.05}>
+            <SpendingSummary
+              total={summary.total}
+              month={summary.month}
+              incomeTotal={summary.income_total}
+              carryOver={summary.carry_over}
+              balance={summary.balance}
+            />
+          </AnimatedSection>
+
+          {/* Safe to Spend — current month only */}
+          {isCurrentMonth && (
+            <AnimatedSection delay={0.1}>
+              <SafeToSpend safeToSpend={summary.safe_to_spend} />
+            </AnimatedSection>
+          )}
+
+          {/* Weekly Tempo Sparkline — current month only */}
+          {isCurrentMonth && summary.tempo && summary.tempo.length > 0 && (
+            <AnimatedSection delay={0.15}>
+              <SpendingTempo data={summary.tempo} />
+            </AnimatedSection>
+          )}
+
+          {/* Category Chart */}
+          <AnimatedSection delay={0.2}>
+            <CategoryChart
+              data={
+                summary.by_category as Parameters<
+                  typeof CategoryChart
+                >[0]["data"]
+              }
+            />
+          </AnimatedSection>
+
+          {/* MoM Comparison */}
+          {(isCurrentMonth
+            ? summary.pace_projection > 0
+            : summary.total > 0) && (
+            <AnimatedSection delay={0.25}>
+              <MomComparison
+                paceProjection={
+                  isCurrentMonth ? summary.pace_projection : summary.total
+                }
+                previousMonthTotal={summary.previous_month_total}
+              />
+            </AnimatedSection>
+          )}
+
+          {/* Insight Cards — current month only, loads independently */}
+          {isCurrentMonth &&
+            (insights === null ? (
+              <AnimatedSection delay={0.3}>
+                <div className="space-y-2">
+                  <div className="h-5 w-24 animate-pulse rounded bg-mist/50" />
+                  <div className="h-16 animate-pulse rounded-xl bg-mist/50" />
+                </div>
+              </AnimatedSection>
+            ) : insights.length > 0 ? (
+              <AnimatedSection delay={0.3}>
+                <InsightsCards insights={insights} />
+              </AnimatedSection>
+            ) : null)}
+
+          {/* Recent Expenses */}
+          <AnimatedSection delay={0.35}>
+            <RecentExpenses
+              expenses={
+                summary.recent_expenses as Parameters<
+                  typeof RecentExpenses
+                >[0]["expenses"]
+              }
+            />
+          </AnimatedSection>
+        </AnimatedContent>
       </motion.div>
     </div>
   );

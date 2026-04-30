@@ -61,7 +61,9 @@ export default function ExpensesPage() {
   });
   const [filterCategory, setFilterCategory] = useState<string>("");
   const [filterSubcategory, setFilterSubcategory] = useState<string>("");
-  const [allSubcategories, setAllSubcategories] = useState<Subcategory[] | null>(null);
+  const [allSubcategories, setAllSubcategories] = useState<
+    Subcategory[] | null
+  >(null);
   const [memberNames, setMemberNames] = useState<Record<string, string>>({});
   const [tab, setTab] = useState<"expenses" | "income">("expenses");
   const [incomeEntries, setIncomeEntries] = useState<IncomeEntry[]>([]);
@@ -127,9 +129,10 @@ export default function ExpensesPage() {
 
   // Derive filtered subcategories from the cached full list
   const subcategories = useMemo(
-    () => filterCategory && allSubcategories
-      ? allSubcategories.filter((s) => s.parent_category === filterCategory)
-      : [],
+    () =>
+      filterCategory && allSubcategories
+        ? allSubcategories.filter((s) => s.parent_category === filterCategory)
+        : [],
     [allSubcategories, filterCategory],
   );
 
@@ -327,22 +330,35 @@ export default function ExpensesPage() {
                 className="font-display text-xl font-light transition-colors hover:text-sage"
               >
                 {monthName}
-                <span className="ml-1.5 inline-block text-xs text-ink-light">▾</span>
+                <span className="ml-1.5 inline-block text-xs text-ink-light">
+                  ▾
+                </span>
               </button>
             </AnimatedContent>
             {showMonthPicker && availableMonths.length > 1 && (
               <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowMonthPicker(false)} />
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowMonthPicker(false)}
+                />
                 <div className="absolute left-1/2 top-full z-20 mt-2 max-h-64 w-48 -translate-x-1/2 overflow-y-auto rounded-xl border border-sand/50 bg-cream py-1 shadow-lg">
                   {availableMonths.map((m) => {
                     const [y, mn] = m.split("-").map(Number);
-                    const label = new Date(y, mn - 1).toLocaleString("en", { month: "long", year: "numeric" });
+                    const label = new Date(y, mn - 1).toLocaleString("en", {
+                      month: "long",
+                      year: "numeric",
+                    });
                     return (
                       <button
                         key={m}
-                        onClick={() => { setMonth(m); setShowMonthPicker(false); }}
+                        onClick={() => {
+                          setMonth(m);
+                          setShowMonthPicker(false);
+                        }}
                         className={`flex w-full px-4 py-2 text-left text-sm transition-colors ${
-                          m === month ? "bg-sage/10 text-sage font-medium" : "text-ink hover:bg-mist/50"
+                          m === month
+                            ? "bg-sage/10 text-sage font-medium"
+                            : "text-ink hover:bg-mist/50"
                         }`}
                       >
                         {label}
@@ -422,7 +438,11 @@ export default function ExpensesPage() {
                   {accounts.map((acct) => (
                     <button
                       key={acct.id}
-                      onClick={() => setFilterIncomeAccount(filterIncomeAccount === acct.id ? "" : acct.id)}
+                      onClick={() =>
+                        setFilterIncomeAccount(
+                          filterIncomeAccount === acct.id ? "" : acct.id,
+                        )
+                      }
                       className={`rounded-lg border px-3.5 py-2.5 text-sm transition-colors ${
                         filterIncomeAccount === acct.id
                           ? "border-sage bg-sage/10 text-ink"
@@ -475,39 +495,53 @@ export default function ExpensesPage() {
                     />
                   ))}
                 </>
-              ) : (() => {
-                const filtered = filterIncomeAccount
-                  ? incomeEntries.filter((e) => e.account_id === filterIncomeAccount)
-                  : incomeEntries;
-                return filtered.length === 0 ? (
-                <p className="py-8 text-center text-sm text-ink-light">
-                  No income for this period.
-                </p>
               ) : (
-                filtered.map((entry, i) => (
-                  <AnimatedSection key={entry.id} delay={i * 0.03}>
-                    <IncomeCard
-                      income={{
-                        ...entry,
-                        account_name: accounts.find((a) => a.id === entry.account_id)?.name,
-                      }}
-                      isEditing={editingIncomeId === entry.id}
-                      onEditStart={() => { setEditingIncomeId(entry.id); setShowIncomeForm(false); }}
-                      onEditEnd={() => setEditingIncomeId(null)}
-                      onUpdate={refreshIncome}
-                      onDelete={() => handleDeleteIncome(entry.id, entry.source_label || "Income")}
-                      showAccount={accounts.length > 1}
-                      loggedByName={
-                        Object.keys(memberNames).length > 1 &&
-                        entry.created_by
-                          ? memberNames[entry.created_by]
-                          : undefined
-                      }
-                    />
-                  </AnimatedSection>
-                ))
-              );
-              })()}
+                (() => {
+                  const filtered = filterIncomeAccount
+                    ? incomeEntries.filter(
+                        (e) => e.account_id === filterIncomeAccount,
+                      )
+                    : incomeEntries;
+                  return filtered.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-ink-light">
+                      No income for this period.
+                    </p>
+                  ) : (
+                    filtered.map((entry, i) => (
+                      <AnimatedSection key={entry.id} delay={i * 0.03}>
+                        <IncomeCard
+                          income={{
+                            ...entry,
+                            account_name: accounts.find(
+                              (a) => a.id === entry.account_id,
+                            )?.name,
+                          }}
+                          isEditing={editingIncomeId === entry.id}
+                          onEditStart={() => {
+                            setEditingIncomeId(entry.id);
+                            setShowIncomeForm(false);
+                          }}
+                          onEditEnd={() => setEditingIncomeId(null)}
+                          onUpdate={refreshIncome}
+                          onDelete={() =>
+                            handleDeleteIncome(
+                              entry.id,
+                              entry.source_label || "Income",
+                            )
+                          }
+                          showAccount={accounts.length > 1}
+                          loggedByName={
+                            Object.keys(memberNames).length > 1 &&
+                            entry.created_by
+                              ? memberNames[entry.created_by]
+                              : undefined
+                          }
+                        />
+                      </AnimatedSection>
+                    ))
+                  );
+                })()
+              )}
             </AnimatedContent>
           </motion.div>
         ) : (
@@ -695,7 +729,12 @@ export default function ExpensesPage() {
                         }}
                         onEditEnd={() => setEditingId(null)}
                         onUpdate={invalidateAndRefetch}
-                        onDelete={() => handleDeleteExpense(expense.id, expense.merchant || expense.category)}
+                        onDelete={() =>
+                          handleDeleteExpense(
+                            expense.id,
+                            expense.merchant || expense.category,
+                          )
+                        }
                         showAccount={accounts.length > 1}
                         loggedByName={
                           Object.keys(memberNames).length > 1 &&
