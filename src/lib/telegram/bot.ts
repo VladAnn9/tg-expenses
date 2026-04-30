@@ -1,14 +1,22 @@
-import { Bot, webhookCallback } from "grammy";
+import { Bot, Context, webhookCallback } from "grammy";
 
-let bot: Bot | null = null;
+export type UserProfile = {
+  id: string;
+  household_id: string | null;
+  roast_enabled: boolean;
+};
 
-export function getBot(): Bot {
+export type AppContext = Context & { userProfile?: UserProfile };
+
+let bot: Bot<AppContext> | null = null;
+
+export function getBot(): Bot<AppContext> {
   if (!bot) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     if (!token) {
       throw new Error("TELEGRAM_BOT_TOKEN is not set");
     }
-    bot = new Bot(token);
+    bot = new Bot<AppContext>(token);
   }
   return bot;
 }

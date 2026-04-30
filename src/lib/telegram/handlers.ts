@@ -1,4 +1,5 @@
-import { Bot, Context, GrammyError, HttpError, InlineKeyboard } from "grammy";
+import { Bot, GrammyError, HttpError, InlineKeyboard } from "grammy";
+import type { AppContext } from "./bot";
 import { after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database, ExpenseCategory } from "@/types/database";
@@ -242,7 +243,7 @@ function confirmationKeyboard(pendingId: string): InlineKeyboard {
 
 // ---- Register handlers ----
 
-export function registerHandlers(bot: Bot) {
+export function registerHandlers(bot: Bot<AppContext>) {
   // Global error handler — log only, never auto-reply (likely fails too).
   bot.catch((err) => {
     const updateId = err.ctx.update.update_id;
@@ -340,20 +341,28 @@ export function registerHandlers(bot: Bot) {
     return next();
   });
 
-  // Handle unlinked users for all message types
+  // Profile attach + unlinked-user gate. Now runs for callback_query too so
+  // confirm/edit_sub handlers don't have to refetch findUserByTelegramId.
+  // /start has its own bot.command handler that runs first; the explicit
+  // null branch there handles the unlinked-deep-link case.
   bot.use(async (ctx, next) => {
     if (ctx.message?.text?.startsWith("/start")) return;
-    if (ctx.callbackQuery) return next();
     if (!ctx.from) return;
 
     const user = await findUserByTelegramId(ctx.from.id);
     if (!user) {
+      if (ctx.callbackQuery) {
+        // Stale buttons after unlink: ack so the spinner clears, do nothing.
+        return ctx.answerCallbackQuery({
+          text: "Account no longer linked.",
+        });
+      }
       return ctx.reply(
         'You need to link your Telegram account first.\n\nVisit the Zen Finance web app and click "Link Telegram" to get started.',
       );
     }
 
-    (ctx as Context & { userProfile?: typeof user }).userProfile = user;
+    ctx.userProfile = user;
     return next();
   });
 
@@ -410,8 +419,8 @@ export function registerHandlers(bot: Bot) {
         return;
       }
 
-      // Expense path
-      const userProfile = await findUserByTelegramId(ctx.from!.id);
+      // Expense path — userProfile attached by middleware.
+      const userProfile = ctx.userProfile!;
 
       // Ensure subcategory exists
       let subcategoryId: string | null = null;
@@ -420,7 +429,7 @@ export function registerHandlers(bot: Bot) {
           pending.subcategory,
           pending.category,
           pending.userId,
-          userProfile?.household_id ?? null,
+          userProfile.household_id,
         );
       }
 
@@ -470,7 +479,7 @@ export function registerHandlers(bot: Bot) {
 
       // Roast is best-effort and runs after the response is flushed —
       // it must NOT block the user from sending the next expense.
-      if (userProfile?.roast_enabled) {
+      if (userProfile.roast_enabled) {
         const expensePayload = {
           amount: pending.amount,
           category: pending.category,
@@ -606,11 +615,11 @@ export function registerHandlers(bot: Bot) {
         return ctx.answerCallbackQuery({ text: "Expired." });
       }
       await ctx.answerCallbackQuery();
-      const userProfile = await findUserByTelegramId(ctx.from!.id);
+      const userProfile = ctx.userProfile!;
       const frequent = await getFrequentSubcategories(
         pending.category,
         pending.userId,
-        userProfile?.household_id ?? null,
+        userProfile.household_id,
       );
       const keyboard = new InlineKeyboard();
       for (let i = 0; i < frequent.length; i++) {
@@ -693,15 +702,7 @@ export function registerHandlers(bot: Bot) {
 
   // Text message handler
   bot.on("message:text", async (ctx) => {
-    const userProfile = (
-      ctx as Context & {
-        userProfile?: {
-          id: string;
-          household_id: string | null;
-          roast_enabled: boolean;
-        };
-      }
-    ).userProfile;
+    const userProfile = ctx.userProfile;
     if (!userProfile) return;
     const userId = userProfile.id;
 
@@ -829,15 +830,7 @@ export function registerHandlers(bot: Bot) {
 
   // Voice message handler
   bot.on("message:voice", async (ctx) => {
-    const userProfile = (
-      ctx as Context & {
-        userProfile?: {
-          id: string;
-          household_id: string | null;
-          roast_enabled: boolean;
-        };
-      }
-    ).userProfile;
+    const userProfile = ctx.userProfile;
     if (!userProfile) return;
     const userId = userProfile.id;
 
@@ -937,15 +930,7 @@ export function registerHandlers(bot: Bot) {
 
   // Photo message handler (receipt)
   bot.on("message:photo", async (ctx) => {
-    const userProfile = (
-      ctx as Context & {
-        userProfile?: {
-          id: string;
-          household_id: string | null;
-          roast_enabled: boolean;
-        };
-      }
-    ).userProfile;
+    const userProfile = ctx.userProfile;
     if (!userProfile) return;
     const userId = userProfile.id;
 
