@@ -695,10 +695,29 @@ export function registerHandlers(bot: Bot<AppContext>) {
       const { id: pendingId, field, payload: pending } = editState;
       const value = ctx.message.text.trim();
 
+      // Explicit escape — user can abandon the edit without waiting for the
+      // 10-min row TTL.
+      if (value.toLowerCase() === "/cancel") {
+        await clearAwaiting(pendingId);
+        return ctx.reply("Edit cancelled.");
+      }
+
+      // "Looks like a new expense" guard — prevents misroute of e.g.
+      // "15 coffee" into an amount edit (parseFloat would silently take 15
+      // and overwrite the previous pending item's amount).
+      if (/^\d+([.,]\d+)?\s+\S/.test(value)) {
+        return ctx.reply(
+          `You're editing the ${field} of an earlier expense.\n` +
+            `Reply with just the new ${field}, or send /cancel to start fresh.`,
+        );
+      }
+
       if (field === "amount") {
         const num = parseFloat(value);
         if (isNaN(num) || num <= 0) {
-          return ctx.reply("Please enter a valid positive number.");
+          return ctx.reply(
+            "Please enter a valid positive number (e.g. 12.50). Reply with the amount, or send /cancel to abandon.",
+          );
         }
         pending.amount = num;
       } else if (field === "merchant" && pending.type === "expense") {
@@ -707,13 +726,17 @@ export function registerHandlers(bot: Bot<AppContext>) {
         pending.note = value;
       } else if (field === "date") {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-          return ctx.reply("Please use YYYY-MM-DD format.");
+          return ctx.reply(
+            "Please use YYYY-MM-DD format. Reply with the date, or send /cancel to abandon.",
+          );
         }
         if (pending.type === "expense") pending.expense_date = value;
         else pending.income_date = value;
       } else if (field === "subcategory" && pending.type === "expense") {
         if (value.length === 0) {
-          return ctx.reply("Please enter a subcategory name.");
+          return ctx.reply(
+            "Please enter a subcategory name, or send /cancel to abandon.",
+          );
         }
         const existing = await findExistingSubcategory(
           value,
