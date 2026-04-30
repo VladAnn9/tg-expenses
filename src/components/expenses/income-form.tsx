@@ -36,18 +36,21 @@ export default function IncomeForm({ income, onSave, onCancel }: IncomeFormProps
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Fetch accounts once on mount.
   useEffect(() => {
     fetch("/api/accounts")
       .then((r) => r.json())
-      .then((data) => {
-        const accts: Account[] = data.accounts ?? [];
-        setAccounts(accts);
-        if (!accountId && accts.length > 0) {
-          const primary = accts.find((a) => a.is_primary);
-          setAccountId(primary?.id ?? accts[0].id);
-        }
-      });
+      .then((data) => setAccounts(data.accounts ?? []));
   }, []);
+
+  // Auto-select primary (or first) account once accounts arrive, but only if
+  // the user hasn't already picked one. Splitting this from the fetch effect
+  // keeps each effect's deps honest.
+  useEffect(() => {
+    if (accountId || accounts.length === 0) return;
+    const primary = accounts.find((a) => a.is_primary);
+    setAccountId(primary?.id ?? accounts[0].id);
+  }, [accounts, accountId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

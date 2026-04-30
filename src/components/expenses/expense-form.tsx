@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import { CATEGORIES, CATEGORY_EMOJI } from "@/lib/utils/categories";
 import type { ExpenseCategory, AccountType } from "@/types/database";
@@ -51,32 +51,43 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
   const [newSubcategoryName, setNewSubcategoryName] = useState("");
   const [creatingSub, setCreatingSub] = useState(false);
 
+  // Fetch accounts once on mount.
   useEffect(() => {
     fetch("/api/accounts")
       .then((r) => r.json())
-      .then((data) => {
-        const accts: Account[] = data.accounts ?? [];
-        setAccounts(accts);
-        if (!accountId && accts.length > 0) {
-          const primary = accts.find((a) => a.is_primary);
-          setAccountId(primary?.id ?? accts[0].id);
-        }
-      });
+      .then((data) => setAccounts(data.accounts ?? []));
   }, []);
 
-  // Fetch subcategories when category changes
+  // Auto-select primary (or first) account once accounts arrive, but only if
+  // the user hasn't already picked one. Splitting this from the fetch effect
+  // keeps each effect's deps honest.
+  useEffect(() => {
+    if (accountId || accounts.length === 0) return;
+    const primary = accounts.find((a) => a.is_primary);
+    setAccountId(primary?.id ?? accounts[0].id);
+  }, [accounts, accountId]);
+
+  // Track latest subcategoryId via ref so the category-change effect can read
+  // it for validation without subscribing — adding subcategoryId to the deps
+  // would cause an unwanted refetch every time the user picked a different
+  // subcategory.
+  const subcategoryIdRef = useRef(subcategoryId);
+  useEffect(() => {
+    subcategoryIdRef.current = subcategoryId;
+  }, [subcategoryId]);
+
+  // Fetch subcategories when category changes; clear current selection if it
+  // no longer belongs to the new category.
   useEffect(() => {
     if (!category) return;
     fetch(`/api/subcategories?category=${category}`)
       .then((r) => r.json())
       .then((data) => {
-        setSubcategories(data.subcategories ?? []);
-        // Clear subcategory if it doesn't belong to the new category
-        if (subcategoryId) {
-          const stillValid = (data.subcategories ?? []).some(
-            (s: Subcategory) => s.id === subcategoryId
-          );
-          if (!stillValid) setSubcategoryId("");
+        const subs: Subcategory[] = data.subcategories ?? [];
+        setSubcategories(subs);
+        const current = subcategoryIdRef.current;
+        if (current && !subs.some((s) => s.id === current)) {
+          setSubcategoryId("");
         }
       });
   }, [category]);
