@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getHouseholdId, isHouseholdOwner } from "@/lib/supabase/household";
+import { isHouseholdOwner } from "@/lib/supabase/household";
 
 /** Check if user can manage this account (own account or household owner). */
 async function canManageAccount(

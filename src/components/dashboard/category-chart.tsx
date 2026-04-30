@@ -6,7 +6,6 @@ import { LayoutGroup, motion } from "motion/react";
 import { CATEGORY_EMOJI } from "@/lib/utils/categories";
 import type { ExpenseCategory } from "@/types/database";
 
-const ZEN_EASE: [number, number, number, number] = [0.25, 0.1, 0.25, 1];
 const CSS_EASE = "cubic-bezier(0.25, 0.1, 0.25, 1)";
 
 /* ── Animated Sort Icon — morphs bar widths via stroke-dasharray ──

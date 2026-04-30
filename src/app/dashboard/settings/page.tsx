@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import AnimatedSection from "@/components/ui/animated-section";
 import TelegramLink from "@/components/telegram-link";
 import { CATEGORIES, CATEGORY_EMOJI } from "@/lib/utils/categories";
@@ -56,18 +56,28 @@ export default function SettingsPage() {
       .finally(() => setLoadingSettings(false));
   }, []);
 
-  // Fetch subcategories
-  const fetchSubcategories = useCallback(() => {
-    setLoadingSubs(true);
-    fetch("/api/subcategories")
-      .then((r) => r.json())
-      .then((data) => setSubcategories(data.subcategories ?? []))
-      .finally(() => setLoadingSubs(false));
-  }, []);
+  // Bumping refreshSubsKey re-runs the fetch effect — used by event
+  // handlers after add/edit/merge/delete. Keeps setState off the
+  // synchronous effect body.
+  const [refreshSubsKey, setRefreshSubsKey] = useState(0);
+  const refreshSubcategories = () => setRefreshSubsKey((k) => k + 1);
 
   useEffect(() => {
-    fetchSubcategories();
-  }, [fetchSubcategories]);
+    let active = true;
+    fetch("/api/subcategories")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!active) return;
+        setSubcategories(data.subcategories ?? []);
+        setLoadingSubs(false);
+      })
+      .catch(() => {
+        if (active) setLoadingSubs(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshSubsKey]);
 
   // Toggle roast
   const toggleRoast = async () => {
@@ -100,7 +110,7 @@ export default function SettingsPage() {
     if (res.ok) {
       setNewSubName("");
       setAddingCategory(null);
-      fetchSubcategories();
+      refreshSubcategories();
     }
     setAddingLoading(false);
   };
@@ -116,7 +126,7 @@ export default function SettingsPage() {
     if (res.ok) {
       setEditingId(null);
       setEditName("");
-      fetchSubcategories();
+      refreshSubcategories();
     }
   };
 
@@ -139,7 +149,7 @@ export default function SettingsPage() {
           parent_category: sub.parent_category,
         }),
       });
-      fetchSubcategories();
+      refreshSubcategories();
     });
   };
 

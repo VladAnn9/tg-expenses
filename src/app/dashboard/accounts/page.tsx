@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import AccountCard from "@/components/accounts/account-card";
 import AccountForm from "@/components/accounts/account-form";
 import AnimatedSection from "@/components/ui/animated-section";
@@ -21,19 +21,24 @@ export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-
-  const fetchAccounts = useCallback(async () => {
-    const res = await fetch("/api/accounts");
-    if (res.ok) {
-      const data = await res.json();
-      setAccounts(data.accounts);
-    }
-    setLoading(false);
-  }, []);
+  // Bumping refreshKey re-runs the fetch effect — used by event handlers
+  // after mutations. Keeps setState off the synchronous effect body.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const refresh = () => setRefreshKey((k) => k + 1);
 
   useEffect(() => {
-    fetchAccounts();
-  }, [fetchAccounts]);
+    let active = true;
+    fetch("/api/accounts")
+      .then((r) => (r.ok ? r.json() : { accounts: [] }))
+      .then((data) => {
+        if (!active) return;
+        setAccounts(data.accounts ?? []);
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshKey]);
 
   const handleSetPrimary = async (id: string) => {
     await fetch(`/api/accounts/${id}`, {
@@ -41,7 +46,7 @@ export default function AccountsPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_primary: true }),
     });
-    fetchAccounts();
+    refresh();
   };
 
   const handleDelete = async (id: string) => {
@@ -52,7 +57,7 @@ export default function AccountsPage() {
       alert(data.error || "Failed to delete");
       return;
     }
-    fetchAccounts();
+    refresh();
   };
 
   if (loading) {
@@ -87,7 +92,7 @@ export default function AccountsPage() {
             <AccountForm
               onSave={() => {
                 setShowForm(false);
-                fetchAccounts();
+                refresh();
               }}
               onCancel={() => setShowForm(false)}
             />
@@ -99,7 +104,7 @@ export default function AccountsPage() {
         {accounts.map((account, i) => (
           <AnimatedSection key={account.id} delay={0.1 + i * 0.03}>
             <div className="relative">
-              <AccountCard account={account} onUpdate={fetchAccounts} />
+              <AccountCard account={account} onUpdate={refresh} />
               <div className="mt-2 flex gap-2">
                 {!account.is_primary && (
                   <>

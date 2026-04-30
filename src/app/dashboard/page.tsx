@@ -108,17 +108,25 @@ export default function DashboardPage() {
       });
   }, [month]);
 
-  // Insights — only for current month
+  // Reset insights when month/current-month status changes — adjusting
+  // state during render is the React-recommended pattern; keeps the
+  // fetch effect's body free of synchronous setState.
+  const [prevInsightsKey, setPrevInsightsKey] = useState(
+    `${month}|${isCurrentMonth}`,
+  );
+  const insightsKey = `${month}|${isCurrentMonth}`;
+  if (insightsKey !== prevInsightsKey) {
+    setPrevInsightsKey(insightsKey);
+    setInsights(isCurrentMonth ? null : []);
+  }
+
+  // Insights — only for current month.
   useEffect(() => {
-    if (isCurrentMonth) {
-      setInsights(null);
-      fetch(`/api/insights?month=${month}`)
-        .then((r) => r.json())
-        .then((data) => setInsights(data.insights ?? []))
-        .catch(() => setInsights([]));
-    } else {
-      setInsights([]);
-    }
+    if (!isCurrentMonth) return;
+    fetch(`/api/insights?month=${month}`)
+      .then((r) => r.json())
+      .then((data) => setInsights(data.insights ?? []))
+      .catch(() => setInsights([]));
   }, [month, isCurrentMonth]);
 
   if (loading) {
