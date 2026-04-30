@@ -8,11 +8,15 @@ export const maxDuration = 30;
 let initialized = false;
 
 export async function POST(req: NextRequest) {
-  if (!initialized) {
-    registerHandlers(getBot());
-    initialized = true;
+  try {
+    if (!initialized) {
+      registerHandlers(getBot());
+      initialized = true;
+    }
+    return getWebhookHandler()(req);
+  } catch (err) {
+    // Last-resort: ack to Telegram so it stops retrying init failures.
+    console.error("[webhook] fatal:", err);
+    return new Response("ok", { status: 200 });
   }
-
-  const handler = getWebhookHandler();
-  return handler(req);
 }

@@ -1,4 +1,4 @@
-import { Bot, Context, InlineKeyboard } from "grammy";
+import { Bot, Context, GrammyError, HttpError, InlineKeyboard } from "grammy";
 import { after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database, ExpenseCategory } from "@/types/database";
@@ -242,6 +242,23 @@ function confirmationKeyboard(pendingId: string): InlineKeyboard {
 // ---- Register handlers ----
 
 export function registerHandlers(bot: Bot) {
+  // Global error handler — log only, never auto-reply (likely fails too).
+  bot.catch((err) => {
+    const updateId = err.ctx.update.update_id;
+    const e = err.error;
+    if (e instanceof GrammyError) {
+      console.error(
+        `[bot] update=${updateId} GrammyError ${e.error_code}: ${e.description}`,
+      );
+      return;
+    }
+    if (e instanceof HttpError) {
+      console.error(`[bot] update=${updateId} HttpError:`, e);
+      return;
+    }
+    console.error(`[bot] update=${updateId} Unknown error:`, e);
+  });
+
   // /start command — handle deep link tokens
   bot.command("start", async (ctx) => {
     const token = ctx.match;
