@@ -19,7 +19,9 @@ export default function UndoToast({
   const [remaining, setRemaining] = useState(duration);
   const [undoing, setUndoing] = useState(false);
   const expireRef = useRef(onExpire);
-  expireRef.current = onExpire;
+  useEffect(() => {
+    expireRef.current = onExpire;
+  }, [onExpire]);
 
   useEffect(() => {
     const interval = setInterval(() => {
