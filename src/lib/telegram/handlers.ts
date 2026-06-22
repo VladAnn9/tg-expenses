@@ -4,6 +4,7 @@ import { after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database, ExpenseCategory } from "@/types/database";
 import { CATEGORIES, CATEGORY_EMOJI } from "@/lib/utils/categories";
+import { sanitizeExpenseDate } from "@/lib/utils/expense-date";
 import {
   parseTextExpense,
   parseVoiceExpense,
@@ -820,7 +821,7 @@ export function registerHandlers(bot: Bot<AppContext>) {
         merchant,
         originalMerchant,
         note: result.note,
-        expense_date: result.date || today,
+        expense_date: sanitizeExpenseDate(result.date, today),
         source: "text",
         transcript: ctx.message.text,
         userId,
@@ -931,7 +932,7 @@ export function registerHandlers(bot: Bot<AppContext>) {
               merchant,
               originalMerchant,
               note: result.note,
-              expense_date: result.date || today,
+              expense_date: sanitizeExpenseDate(result.date, today),
               source: "voice",
               transcript,
               userId,
@@ -1016,6 +1017,7 @@ export function registerHandlers(bot: Bot<AppContext>) {
           }
 
           const pendingId = nanoid(8);
+          const today = new Date().toISOString().split("T")[0];
           const item: PendingItem = {
             type: "expense",
             amount: result.amount,
@@ -1024,7 +1026,7 @@ export function registerHandlers(bot: Bot<AppContext>) {
             merchant: result.merchant,
             originalMerchant: null,
             note: result.note,
-            expense_date: result.date || new Date().toISOString().split("T")[0],
+            expense_date: sanitizeExpenseDate(result.date, today),
             source: "receipt",
             transcript: `Amount: ${result.amount}, Merchant: ${result.merchant || "unknown"}`,
             userId,

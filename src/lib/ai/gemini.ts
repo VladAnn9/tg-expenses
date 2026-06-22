@@ -138,13 +138,15 @@ export async function parseReceiptImage(
   mimeType: string
 ): Promise<ParseResult> {
   try {
+    const today = new Date().toISOString().split("T")[0];
+    const prompt = RECEIPT_PARSING_PROMPT.replaceAll("{today}", today);
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [
         {
           role: "user",
           parts: [
-            { text: RECEIPT_PARSING_PROMPT },
+            { text: prompt },
             {
               inlineData: {
                 mimeType,

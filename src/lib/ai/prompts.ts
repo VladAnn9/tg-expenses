@@ -65,10 +65,10 @@ If the transcription does not describe an expense or income, return: { "error": 
 
 Respond with ONLY the JSON object, no markdown or explanation.`;
 
-export const RECEIPT_PARSING_PROMPT = `You are a receipt parser. Analyze this receipt image and extract:
+export const RECEIPT_PARSING_PROMPT = `You are a receipt parser. Today's date is {today}. Analyze this receipt image and extract:
 - amount: number (the total/final amount, must be positive)
 - merchant: string (the store/business name)
-- date: string in YYYY-MM-DD format (the receipt date)
+- date: string in YYYY-MM-DD format (the receipt date). It must never be in the future relative to {today}. If the receipt shows no year, or the year is unclear, assume the receipt is recent and use the most plausible recent date — default to {today}'s year. Never fall back to an older year like 2023.
 - category: string (one of: Food, Dining, Housing, Bills, Transport, Travel, Sport, Shopping, Entertainment, Health, Other — use Travel for hotels/airlines/trip-related receipts; use Sport for gyms, fitness studios, sportswear/equipment retailers like Decathlon, and race-fee receipts)
 - subcategory: string or null (suggest based on items)
 - items: string (brief summary of main items, for the note field)
