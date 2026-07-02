@@ -62,6 +62,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [primaryAccountName, setPrimaryAccountName] = useState<string | null>(
+    null,
+  );
 
   const isCurrentMonth = month === getCurrentMonth();
 
@@ -87,7 +90,7 @@ export default function DashboardPage() {
     if (info.offset.x > 60) prevMonth();
   };
 
-  // Fetch settings + available months once
+  // Fetch settings + available months + primary account once
   useEffect(() => {
     fetch("/api/settings")
       .then((r) => r.json())
@@ -95,6 +98,15 @@ export default function DashboardPage() {
     fetch("/api/months")
       .then((r) => r.json())
       .then((data) => setAvailableMonths(data.months ?? []))
+      .catch(() => {});
+    fetch("/api/accounts")
+      .then((r) => r.json())
+      .then((data) => {
+        const primary = (data.accounts ?? []).find(
+          (a: { is_primary: boolean; name: string }) => a.is_primary,
+        );
+        setPrimaryAccountName(primary?.name ?? null);
+      })
       .catch(() => {});
   }, []);
 
@@ -152,7 +164,7 @@ export default function DashboardPage() {
           >
             ← Prev
           </button>
-          <div className="relative">
+          <div className="relative text-center">
             <AnimatedContent transitionKey={month}>
               <button
                 onClick={() => setShowMonthPicker(!showMonthPicker)}
@@ -164,6 +176,11 @@ export default function DashboardPage() {
                 </span>
               </button>
             </AnimatedContent>
+            {primaryAccountName && (
+              <p className="mt-0.5 text-xs font-light text-ink-light">
+                Primary · {primaryAccountName}
+              </p>
+            )}
             {showMonthPicker && availableMonths.length > 1 && (
               <>
                 <div

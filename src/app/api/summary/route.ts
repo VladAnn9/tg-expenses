@@ -1,9 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getHouseholdMemberIds } from "@/lib/supabase/household";
+import { getHouseholdId, getHouseholdMemberIds } from "@/lib/supabase/household";
 import type { ExpenseCategory } from "@/types/database";
 import { CATEGORIES } from "@/lib/utils/categories";
+
+/**
+ * Resolves the user's primary account id (household-scoped when the user is
+ * in a household, per-user otherwise). is_primary uniqueness is
+ * application-enforced, not a DB constraint, so this must tolerate 0 or >1
+ * primaries — first row wins, null means "no primary" (caller falls back to
+ * all accounts).
+ */
+async function resolvePrimaryAccountId(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string
+): Promise<string | null> {
+  const householdId = await getHouseholdId(admin, userId);
+  const query = householdId
+    ? admin.from("accounts").select("id").eq("household_id", householdId)
+    : admin.from("accounts").select("id").eq("user_id", userId);
+
+  const { data } = await query.eq("is_primary", true).limit(1);
+  return data?.[0]?.id ?? null;
+}
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
@@ -22,7 +42,11 @@ export async function GET(req: NextRequest) {
   const month =
     searchParams.get("month") ||
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const accountId = searchParams.get("account_id");
+  // Explicit ?account_id= overrides; otherwise scope to the primary account.
+  // Null (no primary, no override) keeps the legacy all-accounts behavior.
+  const accountId =
+    searchParams.get("account_id") ??
+    (await resolvePrimaryAccountId(admin, user.id));
 
   const [year, monthNum] = month.split("-").map(Number);
   const startDate = `${year}-${String(monthNum).padStart(2, "0")}-01`;
@@ -93,12 +117,18 @@ export async function GET(req: NextRequest) {
   });
 
   // Income total
-  const { data: incomeData } = await admin
+  let incomeQuery = admin
     .from("income_entries")
     .select("amount")
     .in("created_by", memberIds)
     .gte("income_date", startDate)
     .lt("income_date", endDate);
+
+  if (accountId) {
+    incomeQuery = incomeQuery.eq("account_id", accountId);
+  }
+
+  const { data: incomeData } = await incomeQuery;
 
   const incomeTotal = (incomeData ?? []).reduce(
     (sum, e) => sum + Number(e.amount),
@@ -110,12 +140,18 @@ export async function GET(req: NextRequest) {
   const prevYear = monthNum === 1 ? year - 1 : year;
   const prevStartDate = `${prevYear}-${String(prevMonth).padStart(2, "0")}-01`;
 
-  const { data: prevExpenses } = await admin
+  let prevQuery = admin
     .from("expenses")
     .select("amount")
     .in("created_by", memberIds)
     .gte("expense_date", prevStartDate)
     .lt("expense_date", startDate);
+
+  if (accountId) {
+    prevQuery = prevQuery.eq("account_id", accountId);
+  }
+
+  const { data: prevExpenses } = await prevQuery;
 
   const previousMonthTotal = (prevExpenses ?? []).reduce(
     (sum, e) => sum + Number(e.amount),
@@ -135,12 +171,18 @@ export async function GET(req: NextRequest) {
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
   const tempoStart = sevenDaysAgo.toISOString().split("T")[0];
 
-  const { data: tempoExpenses } = await admin
+  let tempoQuery = admin
     .from("expenses")
     .select("amount, expense_date, category, subcategory_id")
     .in("created_by", memberIds)
     .gte("expense_date", tempoStart)
     .lte("expense_date", now.toISOString().split("T")[0]);
+
+  if (accountId) {
+    tempoQuery = tempoQuery.eq("account_id", accountId);
+  }
+
+  const { data: tempoExpenses } = await tempoQuery;
 
   // Get subcategory names for tempo breakdown
   const tempoSubIds = [...new Set((tempoExpenses ?? []).map((e) => e.subcategory_id).filter((id): id is string => !!id))];
@@ -187,9 +229,17 @@ export async function GET(req: NextRequest) {
     categories: t.categories.sort((a, b) => b.amount - a.amount),
   }));
 
-  // Balance at start of month (carry-over from previous months) — sum across household
+  // Balance at start of month (carry-over from previous months) — sum across household.
+  // undefined p_account_id is dropped from the JSON body, so the RPC's
+  // DEFAULT NULL (= all accounts) applies.
   const balanceResults = await Promise.all(
-    memberIds.map((id) => admin.rpc("balance_at", { p_user_id: id, p_date: startDate }))
+    memberIds.map((id) =>
+      admin.rpc("balance_at", {
+        p_user_id: id,
+        p_date: startDate,
+        p_account_id: accountId ?? undefined,
+      })
+    )
   );
   const carryOver = balanceResults.reduce((sum, r) => sum + (Number(r.data) || 0), 0);
 
@@ -198,13 +248,21 @@ export async function GET(req: NextRequest) {
 
   // Check if household has any income ever (for safe-to-spend visibility)
   const incomeCheckResults = await Promise.all(
-    memberIds.map((id) => admin.rpc("sum_income", { p_user_id: id, p_before: endDate }))
+    memberIds.map((id) =>
+      admin.rpc("sum_income", {
+        p_user_id: id,
+        p_before: endDate,
+        p_account_id: accountId ?? undefined,
+      })
+    )
   );
   const hasAnyIncome = incomeCheckResults.some((r) => (Number(r.data) || 0) > 0);
 
   // Safe to Spend (null if no income ever)
   let safeToSpend: number | null = null;
   if (hasAnyIncome) {
+    // Subscriptions carry no account_id column, so they stay unscoped
+    // (whole-household) even when the summary is account-scoped.
     const { data: confirmedSubs } = await admin
       .from("subscriptions")
       .select("amount")
@@ -219,10 +277,16 @@ export async function GET(req: NextRequest) {
   }
 
   // Recent expenses — by creation time, so just-logged entries always appear at top
-  const { data: recent } = await admin
+  let recentQuery = admin
     .from("expenses")
     .select("id, amount, category, merchant, expense_date, note, created_by")
-    .in("created_by", memberIds)
+    .in("created_by", memberIds);
+
+  if (accountId) {
+    recentQuery = recentQuery.eq("account_id", accountId);
+  }
+
+  const { data: recent } = await recentQuery
     .order("created_at", { ascending: false })
     .limit(10);
 
