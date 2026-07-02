@@ -10,6 +10,7 @@ import AnimatedSection from "@/components/ui/animated-section";
 import AnimatedContent from "@/components/ui/animated-content";
 import { CATEGORIES, CATEGORY_EMOJI } from "@/lib/utils/categories";
 import { useUndoToast } from "@/components/ui/undo-toast";
+import { useInfiniteScroll } from "@/lib/hooks/use-infinite-scroll";
 import type { ExpenseCategory, AccountType } from "@/types/database";
 
 interface IncomeEntry {
@@ -49,9 +50,24 @@ interface Subcategory {
   expense_count: number;
 }
 
+const PAGE_SIZE = 30;
+
+interface ExpenseCacheEntry {
+  rows: Expense[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
 export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Index where the most recently loaded page starts — the entrance stagger
+  // is measured from here so appended rows animate immediately instead of
+  // inheriting a delay proportional to the full list length.
+  const [newPageStart, setNewPageStart] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -174,35 +190,54 @@ export default function ExpensesPage() {
       });
   };
 
-  // Client-side cache: "month|category|account" → Expense[]
-  const cache = useRef(new Map<string, Expense[]>());
+  // Client-side cache: "month|category|account|subcategory" → accumulated
+  // pages for that view
+  const cache = useRef(new Map<string, ExpenseCacheEntry>());
 
   const cacheKey = `${month}|${filterCategory}|${filterAccount}|${filterSubcategory}`;
 
-  const fetchFromApi = useCallback(
-    async (key: string, silent: boolean) => {
-      const [m, cat, acct, subcat] = key.split("|");
-      const params = new URLSearchParams({ month: m, limit: "50" });
-      if (cat) params.set("category", cat);
-      if (acct) params.set("account_id", acct);
-      if (subcat) params.set("subcategory_id", subcat);
+  // View change remounts the whole list (AnimatedContent transitionKey), so
+  // the stagger scope resets with it. Adjust-state-during-render, same
+  // pattern as the subcategory reset above.
+  const [prevCacheKey, setPrevCacheKey] = useState(cacheKey);
+  if (cacheKey !== prevCacheKey) {
+    setPrevCacheKey(cacheKey);
+    setNewPageStart(0);
+  }
 
-      const res = await fetch(`/api/expenses?${params}`);
-      if (res.ok) {
-        const data = await res.json();
-        cache.current.set(key, data.expenses);
-        // Only update UI if we're still on the same key
-        if (
-          `${month}|${filterCategory}|${filterAccount}|${filterSubcategory}` ===
-          key
-        ) {
-          setExpenses(data.expenses);
-        }
+  // Latest key for async guards — in-flight responses must not write state
+  // for a view the user has already left.
+  const cacheKeyRef = useRef(cacheKey);
+  useEffect(() => {
+    cacheKeyRef.current = cacheKey;
+  }, [cacheKey]);
+
+  const fetchFromApi = useCallback(async (key: string, silent: boolean) => {
+    const [m, cat, acct, subcat] = key.split("|");
+    const params = new URLSearchParams({ month: m, limit: String(PAGE_SIZE) });
+    if (cat) params.set("category", cat);
+    if (acct) params.set("account_id", acct);
+    if (subcat) params.set("subcategory_id", subcat);
+
+    const res = await fetch(`/api/expenses?${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      const entry: ExpenseCacheEntry = {
+        rows: data.expenses,
+        nextCursor: data.next_cursor ?? null,
+        hasMore: data.has_more ?? false,
+      };
+      cache.current.set(key, entry);
+      // Only update UI if we're still on the same key
+      if (cacheKeyRef.current === key) {
+        setNewPageStart(0);
+        setExpenses(entry.rows);
+        setNextCursor(entry.nextCursor);
+        setHasMore(entry.hasMore);
       }
-      if (!silent) setLoading(false);
-    },
-    [month, filterCategory, filterAccount, filterSubcategory],
-  );
+    }
+    if (!silent) setLoading(false);
+  }, []);
 
   const fetchExpenses = useCallback(
     async (opts?: { invalidate?: boolean }) => {
@@ -211,9 +246,11 @@ export default function ExpensesPage() {
 
       // Show cached data instantly if available
       if (cached && !opts?.invalidate) {
-        setExpenses(cached);
+        setExpenses(cached.rows);
+        setNextCursor(cached.nextCursor);
+        setHasMore(cached.hasMore);
         setLoading(false);
-        // Revalidate silently in background
+        // Revalidate page 1 silently in background
         fetchFromApi(key, true);
         return;
       }
@@ -229,6 +266,54 @@ export default function ExpensesPage() {
   useEffect(() => {
     fetchExpenses();
   }, [fetchExpenses]);
+
+  // Guards double-fires between renders (state updates lag the observer)
+  const loadingMoreRef = useRef(false);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMore || !nextCursor) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+
+    const key = cacheKey;
+    const [m, cat, acct, subcat] = key.split("|");
+    const params = new URLSearchParams({
+      month: m,
+      limit: String(PAGE_SIZE),
+      cursor: nextCursor,
+    });
+    if (cat) params.set("category", cat);
+    if (acct) params.set("account_id", acct);
+    if (subcat) params.set("subcategory_id", subcat);
+
+    const res = await fetch(`/api/expenses?${params}`);
+    if (res.ok && cacheKeyRef.current === key) {
+      const data = await res.json();
+      // Dedupe on id: an optimistic add/delete can shift the page boundary
+      // while this request is in flight.
+      const seen = new Set(expenses.map((e) => e.id));
+      const appended = (data.expenses as Expense[]).filter(
+        (e) => !seen.has(e.id),
+      );
+      const entry: ExpenseCacheEntry = {
+        rows: [...expenses, ...appended],
+        nextCursor: data.next_cursor ?? null,
+        hasMore: data.has_more ?? false,
+      };
+      cache.current.set(key, entry);
+      setNewPageStart(expenses.length);
+      setExpenses(entry.rows);
+      setNextCursor(entry.nextCursor);
+      setHasMore(entry.hasMore);
+    }
+
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+  }, [cacheKey, expenses, hasMore, nextCursor]);
+
+  const sentinelRef = useInfiniteScroll(loadMore, {
+    enabled: tab === "expenses" && !loading && !loadingMore && hasMore,
+  });
 
   // After creating/editing, invalidate all cache for this month (data changed)
   const invalidateAndRefetch = useCallback(() => {
@@ -728,7 +813,10 @@ export default function ExpensesPage() {
                     (a) => a.id === expense.account_id,
                   );
                   return (
-                    <AnimatedSection key={expense.id} delay={i * 0.03}>
+                    <AnimatedSection
+                      key={expense.id}
+                      delay={Math.max(0, i - newPageStart) * 0.03}
+                    >
                       <ExpenseCard
                         expense={{ ...expense, account_name: acct?.name }}
                         isEditing={editingId === expense.id}
@@ -757,6 +845,22 @@ export default function ExpensesPage() {
                 })
               )}
             </AnimatedContent>
+
+            {/* Infinite scroll sentinel — loads the next page as it nears view */}
+            <div ref={sentinelRef} className="space-y-3">
+              {loadingMore &&
+                [1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className="h-20 animate-pulse rounded-xl bg-mist/50"
+                  />
+                ))}
+            </div>
+            {!loading && !hasMore && expenses.length > 0 && (
+              <p className="text-center text-sm text-ink-light">
+                That&apos;s everything.
+              </p>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
