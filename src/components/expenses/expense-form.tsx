@@ -256,7 +256,13 @@ export default function ExpenseForm({ expense, onSave, onCancel }: ExpenseFormPr
             <div
               className="flex items-center gap-1.5"
               onBlur={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                // Touch blurs report relatedTarget=null — collapse only on a real
+                // focus move, and never while a name is in progress.
+                if (
+                  e.relatedTarget instanceof Node &&
+                  !e.currentTarget.contains(e.relatedTarget) &&
+                  !newSubcategoryName.trim()
+                ) {
                   setShowNewSubcategory(false);
                   setNewSubcategoryName("");
                 }

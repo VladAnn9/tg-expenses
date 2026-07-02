@@ -60,17 +60,17 @@ export default function ExpenseCard({
   // Close on click outside
   useEffect(() => {
     if (!isEditing) return;
-    const handleClick = (e: MouseEvent) => {
+    const handleClick = (e: PointerEvent) => {
       if (cardRef.current && !cardRef.current.contains(e.target as Node)) {
         onEditEnd();
       }
     };
     const timer = setTimeout(() => {
-      document.addEventListener("mousedown", handleClick);
+      document.addEventListener("pointerdown", handleClick);
     }, 10);
     return () => {
       clearTimeout(timer);
-      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("pointerdown", handleClick);
     };
   }, [isEditing, onEditEnd]);
 
@@ -175,7 +175,8 @@ export default function ExpenseCard({
                     className="flex items-center gap-1.5"
                     onClick={(e) => e.stopPropagation()}
                     onBlur={(e) => {
-                      if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                      // Touch blurs report relatedTarget=null — collapse only on a real focus move
+                      if (e.relatedTarget instanceof Node && !e.currentTarget.contains(e.relatedTarget)) {
                         setNoteValue(expense.note ?? "");
                         setEditingNote(false);
                       }
