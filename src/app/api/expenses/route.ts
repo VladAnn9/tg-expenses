@@ -90,7 +90,15 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { amount, category, merchant, note, expense_date, account_id } = body;
+  const {
+    amount,
+    category,
+    merchant,
+    note,
+    expense_date,
+    account_id,
+    subcategory_id,
+  } = body;
 
   if (!amount || Number(amount) <= 0) {
     return NextResponse.json(
@@ -104,6 +112,26 @@ export async function POST(req: NextRequest) {
       { error: "Invalid category" },
       { status: 400 }
     );
+  }
+
+  // Subcategories are shared across the household, so ownership is checked
+  // against all member ids (same scoping as GET /api/subcategories).
+  if (subcategory_id) {
+    const admin = createAdminClient();
+    const memberIds = await getHouseholdMemberIds(admin, user.id);
+    const { data: subcategory } = await admin
+      .from("subcategories")
+      .select("id, parent_category")
+      .eq("id", subcategory_id)
+      .in("created_by", memberIds)
+      .single();
+
+    if (!subcategory || subcategory.parent_category !== category) {
+      return NextResponse.json(
+        { error: "Invalid subcategory" },
+        { status: 400 }
+      );
+    }
   }
 
   // Use provided account_id or find primary account
@@ -147,6 +175,7 @@ export async function POST(req: NextRequest) {
       category,
       merchant: merchant || null,
       note: note || null,
+      subcategory_id: subcategory_id || null,
       source: "web" as const,
       expense_date: expense_date || new Date().toISOString().split("T")[0],
       created_by: user.id,

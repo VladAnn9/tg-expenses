@@ -31,6 +31,7 @@ interface Expense {
   expense_date: string;
   source: string;
   account_id?: string;
+  subcategory_id?: string | null;
   created_by?: string;
 }
 
@@ -284,6 +285,7 @@ export default function ExpensesPage() {
             note: expenseData.note,
             expense_date: expenseData.expense_date,
             account_id: expenseData.account_id,
+            subcategory_id: expenseData.subcategory_id,
           }),
         });
       }
