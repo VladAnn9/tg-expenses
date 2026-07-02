@@ -633,7 +633,7 @@ export type Database = {
     };
     Functions: {
       balance_at: {
-        Args: { p_date: string; p_user_id: string };
+        Args: { p_account_id?: string; p_date: string; p_user_id: string };
         Returns: number;
       };
       get_frequent_subcategories: {
@@ -658,7 +658,7 @@ export type Database = {
         Returns: number;
       };
       sum_income: {
-        Args: { p_before: string; p_user_id: string };
+        Args: { p_account_id?: string; p_before: string; p_user_id: string };
         Returns: number;
       };
     };
