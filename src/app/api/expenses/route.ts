@@ -4,6 +4,47 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getHouseholdMemberIds } from "@/lib/supabase/household";
 import { isValidCategory } from "@/lib/utils/categories";
 
+const DEFAULT_LIMIT = 30;
+
+// Keyset cursor over the sort tuple (expense_date DESC, created_at DESC,
+// id DESC), encoded as base64url("expense_date|created_at|id") so it
+// survives URL transport as an opaque string.
+interface Cursor {
+  expenseDate: string;
+  createdAt: string;
+  id: string;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIMESTAMP_RE =
+  /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/;
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function decodeCursor(raw: string): Cursor | null {
+  const [expenseDate, createdAt, id, ...rest] = Buffer.from(raw, "base64url")
+    .toString("utf-8")
+    .split("|");
+  if (rest.length > 0 || !expenseDate || !createdAt || !id) return null;
+  // Strict shapes double as PostgREST-filter safety: no commas, parens or
+  // quotes can reach the .or() string built below.
+  if (!DATE_RE.test(expenseDate)) return null;
+  if (!TIMESTAMP_RE.test(createdAt)) return null;
+  if (!UUID_RE.test(id)) return null;
+  return { expenseDate, createdAt, id };
+}
+
+function encodeCursor(row: {
+  expense_date: string;
+  created_at: string;
+  id: string;
+}): string {
+  return Buffer.from(
+    `${row.expense_date}|${row.created_at}|${row.id}`,
+    "utf-8"
+  ).toString("base64url");
+}
+
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
   const {
@@ -25,8 +66,17 @@ export async function GET(req: NextRequest) {
   const category = searchParams.get("category");
   const accountId = searchParams.get("account_id");
   const subcategoryId = searchParams.get("subcategory_id");
-  const limit = Math.min(Number(searchParams.get("limit") || 50), 100);
+  const limit = Math.min(
+    Math.max(Number(searchParams.get("limit")) || DEFAULT_LIMIT, 1),
+    100
+  );
   const offset = Number(searchParams.get("offset") || 0);
+
+  const cursorParam = searchParams.get("cursor");
+  const cursor = cursorParam ? decodeCursor(cursorParam) : null;
+  if (cursorParam && !cursor) {
+    return NextResponse.json({ error: "Invalid cursor" }, { status: 400 });
+  }
 
   const [year, monthNum] = month.split("-").map(Number);
   const startDate = `${year}-${String(monthNum).padStart(2, "0")}-01`;
@@ -37,13 +87,10 @@ export async function GET(req: NextRequest) {
 
   let query = admin
     .from("expenses")
-    .select("*", { count: "exact" })
+    .select("*")
     .in("created_by", memberIds)
     .gte("expense_date", startDate)
-    .lt("expense_date", endDate)
-    .order("expense_date", { ascending: false })
-    .order("created_at", { ascending: false })
-    .range(offset, offset + limit - 1);
+    .lt("expense_date", endDate);
 
   if (category && isValidCategory(category)) {
     query = query.eq("category", category);
@@ -57,7 +104,53 @@ export async function GET(req: NextRequest) {
     query = query.eq("subcategory_id", subcategoryId);
   }
 
-  const { data, count } = await query;
+  if (cursor) {
+    // Keyset predicate for the descending sort: rows strictly after the
+    // cursor position, i.e. (date < d) OR (date = d AND created < c) OR
+    // (date = d AND created = c AND id < i).
+    query = query.or(
+      [
+        `expense_date.lt.${cursor.expenseDate}`,
+        `and(expense_date.eq.${cursor.expenseDate},created_at.lt."${cursor.createdAt}")`,
+        `and(expense_date.eq.${cursor.expenseDate},created_at.eq."${cursor.createdAt}",id.lt.${cursor.id})`,
+      ].join(",")
+    );
+  }
+
+  query = query
+    .order("expense_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
+
+  // Offset kept as a fallback for consumers that don't send a cursor
+  query = cursor ? query.limit(limit) : query.range(offset, offset + limit - 1);
+
+  const { data } = await query;
+  const rows = data ?? [];
+  const hasMore = rows.length === limit;
+  const nextCursor = hasMore ? encodeCursor(rows[rows.length - 1]) : null;
+
+  // Total row count for the active filters (cursor excluded)
+  let countQuery = admin
+    .from("expenses")
+    .select("*", { count: "exact", head: true })
+    .in("created_by", memberIds)
+    .gte("expense_date", startDate)
+    .lt("expense_date", endDate);
+
+  if (category && isValidCategory(category)) {
+    countQuery = countQuery.eq("category", category);
+  }
+
+  if (accountId) {
+    countQuery = countQuery.eq("account_id", accountId);
+  }
+
+  if (subcategoryId) {
+    countQuery = countQuery.eq("subcategory_id", subcategoryId);
+  }
+
+  const { count } = await countQuery;
 
   // Month total
   const { data: totalData } = await admin
@@ -73,9 +166,11 @@ export async function GET(req: NextRequest) {
   );
 
   return NextResponse.json({
-    expenses: data ?? [],
+    expenses: rows,
     total: count ?? 0,
     month_total: monthTotal,
+    next_cursor: nextCursor,
+    has_more: hasMore,
   });
 }
 
