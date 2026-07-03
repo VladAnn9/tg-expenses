@@ -61,6 +61,7 @@ interface ExpenseCacheEntry {
 export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -204,6 +205,7 @@ export default function ExpensesPage() {
   if (cacheKey !== prevCacheKey) {
     setPrevCacheKey(cacheKey);
     setNewPageStart(0);
+    setLoadFailed(false);
     setLoadMoreFailed(false);
   }
 
@@ -221,8 +223,9 @@ export default function ExpensesPage() {
     if (acct) params.set("account_id", acct);
     if (subcat) params.set("subcategory_id", subcat);
 
-    const res = await fetch(`/api/expenses?${params}`);
-    if (res.ok) {
+    try {
+      const res = await fetch(`/api/expenses?${params}`);
+      if (!res.ok) throw new Error(`expenses fetch failed: ${res.status}`);
       const data = await res.json();
       const entry: ExpenseCacheEntry = {
         rows: data.expenses,
@@ -233,13 +236,25 @@ export default function ExpensesPage() {
       // Only update UI if we're still on the same key
       if (cacheKeyRef.current === key) {
         setNewPageStart(0);
+        setLoadFailed(false);
         setLoadMoreFailed(false);
         setExpenses(entry.rows);
         setNextCursor(entry.nextCursor);
         setHasMore(entry.hasMore);
       }
+    } catch {
+      // A failed silent revalidation keeps showing cached rows; only a
+      // visible fresh load surfaces the error. Pagination state is zeroed so
+      // the observer can't fire against the previous view's stale cursor.
+      if (!silent && cacheKeyRef.current === key) {
+        setExpenses([]);
+        setNextCursor(null);
+        setHasMore(false);
+        setLoadFailed(true);
+      }
+    } finally {
+      if (!silent) setLoading(false);
     }
-    if (!silent) setLoading(false);
   }, []);
 
   const fetchExpenses = useCallback(
@@ -817,6 +832,20 @@ export default function ExpensesPage() {
                     />
                   ))}
                 </>
+              ) : loadFailed ? (
+                <p className="py-8 text-center text-sm text-ink-light">
+                  Couldn&apos;t load expenses.{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoadFailed(false);
+                      fetchExpenses();
+                    }}
+                    className="text-terracotta transition-opacity hover:opacity-70"
+                  >
+                    Try again
+                  </button>
+                </p>
               ) : expenses.length === 0 ? (
                 <p className="py-8 text-center text-sm text-ink-light">
                   No expenses for this period.
