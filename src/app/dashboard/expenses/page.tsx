@@ -64,6 +64,7 @@ export default function ExpensesPage() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreFailed, setLoadMoreFailed] = useState(false);
   // Index where the most recently loaded page starts — the entrance stagger
   // is measured from here so appended rows animate immediately instead of
   // inheriting a delay proportional to the full list length.
@@ -203,6 +204,7 @@ export default function ExpensesPage() {
   if (cacheKey !== prevCacheKey) {
     setPrevCacheKey(cacheKey);
     setNewPageStart(0);
+    setLoadMoreFailed(false);
   }
 
   // Latest key for async guards — in-flight responses must not write state
@@ -231,6 +233,7 @@ export default function ExpensesPage() {
       // Only update UI if we're still on the same key
       if (cacheKeyRef.current === key) {
         setNewPageStart(0);
+        setLoadMoreFailed(false);
         setExpenses(entry.rows);
         setNextCursor(entry.nextCursor);
         setHasMore(entry.hasMore);
@@ -286,8 +289,10 @@ export default function ExpensesPage() {
     if (acct) params.set("account_id", acct);
     if (subcat) params.set("subcategory_id", subcat);
 
-    const res = await fetch(`/api/expenses?${params}`);
-    if (res.ok && cacheKeyRef.current === key) {
+    try {
+      const res = await fetch(`/api/expenses?${params}`);
+      if (cacheKeyRef.current !== key) return;
+      if (!res.ok) throw new Error(`load more failed: ${res.status}`);
       const data = await res.json();
       // Dedupe on id: an optimistic add/delete can shift the page boundary
       // while this request is in flight.
@@ -305,14 +310,23 @@ export default function ExpensesPage() {
       setExpenses(entry.rows);
       setNextCursor(entry.nextCursor);
       setHasMore(entry.hasMore);
+    } catch {
+      // Offline or API failure: surface a manual retry instead of letting
+      // the re-armed observer hammer a failing endpoint.
+      if (cacheKeyRef.current === key) setLoadMoreFailed(true);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
     }
-
-    loadingMoreRef.current = false;
-    setLoadingMore(false);
   }, [cacheKey, expenses, hasMore, nextCursor]);
 
   const sentinelRef = useInfiniteScroll(loadMore, {
-    enabled: tab === "expenses" && !loading && !loadingMore && hasMore,
+    enabled:
+      tab === "expenses" &&
+      !loading &&
+      !loadingMore &&
+      hasMore &&
+      !loadMoreFailed,
   });
 
   // After creating/editing, invalidate all cache for this month (data changed)
@@ -856,6 +870,21 @@ export default function ExpensesPage() {
                   />
                 ))}
             </div>
+            {loadMoreFailed && (
+              <p className="text-center text-sm text-ink-light">
+                Couldn&apos;t load more.{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoadMoreFailed(false);
+                    loadMore();
+                  }}
+                  className="text-terracotta transition-opacity hover:opacity-70"
+                >
+                  Try again
+                </button>
+              </p>
+            )}
             {!loading && !hasMore && expenses.length > 0 && (
               <p className="text-center text-sm text-ink-light">
                 That&apos;s everything.
