@@ -25,6 +25,42 @@ async function resolvePrimaryAccountId(
   return data?.[0]?.id ?? null;
 }
 
+/**
+ * Counts a confirmed subscription's expected charges that still lie ahead
+ * inside the viewed month. next_expected is set once at detection and never
+ * advanced afterwards, so stale anchors are rolled forward by the frequency
+ * period first. Charges due today or earlier are treated as already
+ * materialized in the running balance — only strictly-future charges reduce
+ * safe-to-spend.
+ */
+function countUpcomingCharges(
+  nextExpected: string,
+  frequency: string,
+  today: Date,
+  monthStart: Date,
+  monthEnd: Date
+): number {
+  const date = new Date(nextExpected);
+  if (isNaN(date.getTime())) return 0;
+
+  const step = () => {
+    if (frequency === "weekly") date.setDate(date.getDate() + 7);
+    else if (frequency === "yearly") date.setFullYear(date.getFullYear() + 1);
+    else date.setMonth(date.getMonth() + 1);
+  };
+
+  while (date <= today) step();
+  // When viewing a future month, charges due before it belong to earlier months
+  while (date < monthStart) step();
+
+  let count = 0;
+  while (date < monthEnd) {
+    count++;
+    step();
+  }
+  return count;
+}
+
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
   const {
@@ -265,15 +301,29 @@ export async function GET(req: NextRequest) {
     // (whole-household) even when the summary is account-scoped.
     const { data: confirmedSubs } = await admin
       .from("subscriptions")
-      .select("amount")
+      .select("amount, frequency, next_expected")
       .in("user_id", memberIds)
       .eq("status", "confirmed");
 
-    const monthlySubsTotal = (confirmedSubs ?? []).reduce(
-      (sum, s) => sum + Number(s.amount),
+    // Frequency-aware: a sub that already charged this month is in the
+    // running balance as a real expense, so only remaining occurrences are
+    // subtracted — a weekly sub counts once per upcoming charge, not once flat.
+    const monthStart = new Date(startDate);
+    const monthEnd = new Date(endDate);
+    const upcomingSubsTotal = (confirmedSubs ?? []).reduce(
+      (sum, s) =>
+        sum +
+        Number(s.amount) *
+          countUpcomingCharges(
+            s.next_expected,
+            s.frequency,
+            now,
+            monthStart,
+            monthEnd
+          ),
       0
     );
-    safeToSpend = runningBalance - monthlySubsTotal;
+    safeToSpend = runningBalance - upcomingSubsTotal;
   }
 
   // Recent expenses — by creation time, so just-logged entries always appear at top
