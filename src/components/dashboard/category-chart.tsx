@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { LayoutGroup, motion } from "motion/react";
+import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import { CATEGORY_EMOJI } from "@/lib/utils/categories";
 import type { ExpenseCategory } from "@/types/database";
 
@@ -174,7 +174,10 @@ export default function CategoryChart({ data }: CategoryChartProps) {
             return (
               <motion.div
                 key={item.category}
-                layout
+                // "position" keeps the reorder slide but skips size
+                // interpolation — a plain `layout` scales the row while it
+                // expands, visibly stretching its content.
+                layout="position"
                 transition={{
                   layout: {
                     duration: 0.4,
@@ -216,25 +219,38 @@ export default function CategoryChart({ data }: CategoryChartProps) {
                   </span>
                 </button>
 
-                {/* Subcategory breakdown */}
-                {isExpanded && item.subcategories && (
-                  <div className="ml-5 mt-0.5 mb-1 space-y-0.5 border-l-2 border-sand/30 pl-3">
-                    {item.subcategories.map((sub) => (
-                      <div
-                        key={sub.name}
-                        className="flex items-center justify-between text-xs"
-                      >
-                        <span className="text-ink-light">{sub.name}</span>
-                        <span className="tabular-nums text-ink-light/70">
-                          {sub.total.toFixed(0)} PLN
-                          <span className="ml-1 text-[10px]">
-                            ({sub.count})
-                          </span>
-                        </span>
+                {/* Subcategory breakdown — soft height reveal */}
+                <AnimatePresence initial={false}>
+                  {isExpanded && item.subcategories && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{
+                        duration: 0.4,
+                        ease: [0.25, 0.1, 0.25, 1],
+                      }}
+                      className="overflow-hidden"
+                    >
+                      <div className="ml-5 mt-0.5 mb-1 space-y-0.5 border-l-2 border-sand/30 pl-3">
+                        {item.subcategories.map((sub) => (
+                          <div
+                            key={sub.name}
+                            className="flex items-center justify-between text-xs"
+                          >
+                            <span className="text-ink-light">{sub.name}</span>
+                            <span className="tabular-nums text-ink-light/70">
+                              {sub.total.toFixed(0)} PLN
+                              <span className="ml-1 text-[10px]">
+                                ({sub.count})
+                              </span>
+                            </span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.div>
             );
           })}
