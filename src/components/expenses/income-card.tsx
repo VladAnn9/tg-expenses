@@ -21,6 +21,7 @@ interface IncomeCardProps {
   onEditStart: () => void;
   onEditEnd: () => void;
   onUpdate: () => void;
+  onNoteSaved: (note: string | null) => void;
   onDelete?: () => void;
   loggedByName?: string;
   showAccount?: boolean;
@@ -32,13 +33,13 @@ export default function IncomeCard({
   onEditStart,
   onEditEnd,
   onUpdate,
+  onNoteSaved,
   onDelete,
   loggedByName,
   showAccount,
 }: IncomeCardProps) {
   const [editingNote, setEditingNote] = useState(false);
   const [noteValue, setNoteValue] = useState(income.note ?? "");
-  const [savingNote, setSavingNote] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
@@ -73,19 +74,30 @@ export default function IncomeCard({
     setNoteValue(income.note ?? "");
   }, [income.note]);
 
+  // Opening the full editor supersedes an inline note edit — reset it so the
+  // note input (and its stale draft) doesn't reopen and grab focus when the
+  // card collapses back to view mode.
+  useEffect(() => {
+    if (!isEditing) return;
+    setEditingNote(false);
+    setNoteValue(income.note ?? "");
+  }, [isEditing, income.note]);
+
+  // Optimistic: a note can't affect ordering, sums, or filters, so the list
+  // is patched in place and the PATCH runs in the background — no refetch.
   const saveNoteValue = async (value: string) => {
-    setSavingNote(true);
+    const previous = income.note;
+    setEditingNote(false);
+    onNoteSaved(value || null);
     try {
-      await fetch(`/api/income/${income.id}`, {
+      const res = await fetch(`/api/income/${income.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note: value || null }),
       });
-      setNoteValue(value);
-      setEditingNote(false);
-      onUpdate();
-    } finally {
-      setSavingNote(false);
+      if (!res.ok) throw new Error(`note save failed: ${res.status}`);
+    } catch {
+      onNoteSaved(previous);
     }
   };
 
@@ -191,8 +203,7 @@ export default function IncomeCard({
                     />
                     <button
                       onClick={() => saveNoteValue(noteValue)}
-                      disabled={savingNote}
-                      className="flex-shrink-0 rounded-lg p-2.5 text-sage transition-colors hover:bg-sage/10 active:scale-90 disabled:opacity-40"
+                      className="flex-shrink-0 rounded-lg p-2.5 text-sage transition-colors hover:bg-sage/10 active:scale-90"
                       title="Save note"
                     >
                       <SaveIcon className="h-5 w-5" />
@@ -200,8 +211,7 @@ export default function IncomeCard({
                     {income.note && (
                       <button
                         onClick={() => saveNoteValue("")}
-                        disabled={savingNote}
-                        className="flex-shrink-0 rounded-lg p-2.5 text-terracotta transition-colors hover:bg-terracotta/10 active:scale-90 disabled:opacity-40"
+                        className="flex-shrink-0 rounded-lg p-2.5 text-terracotta transition-colors hover:bg-terracotta/10 active:scale-90"
                         title="Clear note"
                       >
                         <ClearIcon className="h-5 w-5" />

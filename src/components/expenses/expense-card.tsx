@@ -26,6 +26,7 @@ interface ExpenseCardProps {
   onEditStart: () => void;
   onEditEnd: () => void;
   onUpdate: () => void;
+  onNoteSaved: (note: string | null) => void;
   onDelete?: () => void;
   loggedByName?: string;
   showAccount?: boolean;
@@ -37,13 +38,13 @@ export default function ExpenseCard({
   onEditStart,
   onEditEnd,
   onUpdate,
+  onNoteSaved,
   onDelete,
   loggedByName,
   showAccount,
 }: ExpenseCardProps) {
   const [editingNote, setEditingNote] = useState(false);
   const [noteValue, setNoteValue] = useState(expense.note ?? "");
-  const [savingNote, setSavingNote] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
@@ -79,19 +80,30 @@ export default function ExpenseCard({
     setNoteValue(expense.note ?? "");
   }, [expense.note]);
 
+  // Opening the full editor supersedes an inline note edit — reset it so the
+  // note input (and its stale draft) doesn't reopen and grab focus when the
+  // card collapses back to view mode.
+  useEffect(() => {
+    if (!isEditing) return;
+    setEditingNote(false);
+    setNoteValue(expense.note ?? "");
+  }, [isEditing, expense.note]);
+
+  // Optimistic: a note can't affect ordering, sums, or filters, so the list
+  // is patched in place and the PATCH runs in the background — no refetch.
   const saveNoteValue = async (value: string) => {
-    setSavingNote(true);
+    const previous = expense.note;
+    setEditingNote(false);
+    onNoteSaved(value || null);
     try {
-      await fetch(`/api/expenses/${expense.id}`, {
+      const res = await fetch(`/api/expenses/${expense.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note: value || null }),
       });
-      setNoteValue(value);
-      setEditingNote(false);
-      onUpdate();
-    } finally {
-      setSavingNote(false);
+      if (!res.ok) throw new Error(`note save failed: ${res.status}`);
+    } catch {
+      onNoteSaved(previous);
     }
   };
 
@@ -199,8 +211,7 @@ export default function ExpenseCard({
                     />
                     <button
                       onClick={() => saveNoteValue(noteValue)}
-                      disabled={savingNote}
-                      className="flex-shrink-0 rounded-lg p-2.5 text-sage transition-colors hover:bg-sage/10 active:scale-90 disabled:opacity-40"
+                      className="flex-shrink-0 rounded-lg p-2.5 text-sage transition-colors hover:bg-sage/10 active:scale-90"
                       title="Save note"
                     >
                       <SaveIcon className="h-5 w-5" />
@@ -208,8 +219,7 @@ export default function ExpenseCard({
                     {expense.note && (
                       <button
                         onClick={() => saveNoteValue("")}
-                        disabled={savingNote}
-                        className="flex-shrink-0 rounded-lg p-2.5 text-terracotta transition-colors hover:bg-terracotta/10 active:scale-90 disabled:opacity-40"
+                        className="flex-shrink-0 rounded-lg p-2.5 text-terracotta transition-colors hover:bg-terracotta/10 active:scale-90"
                         title="Clear note"
                       >
                         <ClearIcon className="h-5 w-5" />

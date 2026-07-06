@@ -344,6 +344,42 @@ export default function ExpensesPage() {
       !loadMoreFailed,
   });
 
+  // A saved note is patched in place — list state plus every cached view
+  // containing the row — so nothing refetches and the list doesn't remount.
+  const handleExpenseNoteSaved = useCallback(
+    (id: string, note: string | null) => {
+      setExpenses((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, note } : e)),
+      );
+      for (const [key, entry] of cache.current) {
+        if (entry.rows.some((r) => r.id === id)) {
+          cache.current.set(key, {
+            ...entry,
+            rows: entry.rows.map((r) => (r.id === id ? { ...r, note } : r)),
+          });
+        }
+      }
+    },
+    [],
+  );
+
+  const handleIncomeNoteSaved = useCallback(
+    (id: string, note: string | null) => {
+      setIncomeEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, note } : e)),
+      );
+      for (const [key, entries] of incomeCache.current) {
+        if (entries.some((r) => r.id === id)) {
+          incomeCache.current.set(
+            key,
+            entries.map((r) => (r.id === id ? { ...r, note } : r)),
+          );
+        }
+      }
+    },
+    [],
+  );
+
   // After creating/editing, invalidate all cache for this month (data changed)
   const invalidateAndRefetch = useCallback(() => {
     // Clear all keys for current month (all category filters)
@@ -646,6 +682,9 @@ export default function ExpensesPage() {
                           }}
                           onEditEnd={() => setEditingIncomeId(null)}
                           onUpdate={refreshIncome}
+                          onNoteSaved={(note) =>
+                            handleIncomeNoteSaved(entry.id, note)
+                          }
                           onDelete={() =>
                             handleDeleteIncome(
                               entry.id,
@@ -869,6 +908,9 @@ export default function ExpensesPage() {
                         }}
                         onEditEnd={() => setEditingId(null)}
                         onUpdate={invalidateAndRefetch}
+                        onNoteSaved={(note) =>
+                          handleExpenseNoteSaved(expense.id, note)
+                        }
                         onDelete={() =>
                           handleDeleteExpense(
                             expense.id,
