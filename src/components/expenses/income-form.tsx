@@ -157,7 +157,7 @@ export default function IncomeForm({ income, onSave, onCancel }: IncomeFormProps
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="mt-1 w-full max-w-full rounded-lg border border-sand bg-cream/50 px-4 py-3 text-ink focus:border-sage focus:outline-none [&::-webkit-calendar-picker-indicator]:opacity-60"
+          className="mt-1 block w-full min-w-0 appearance-none rounded-lg border border-sand bg-cream/50 px-4 py-3 text-ink focus:border-sage focus:outline-none [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-date-and-time-value]:text-left"
         />
       </div>
 
